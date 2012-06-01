@@ -178,6 +178,7 @@ static int print_unex = 1;
 #include <linux/slab.h>
 #include <linux/mm.h>
 #include <linux/bio.h>
+#include <linux/blk-mq.h>
 #include <linux/string.h>
 #include <linux/jiffies.h>
 #include <linux/fcntl.h>
@@ -895,7 +896,7 @@ static void unlock_fdc(void)
 	cont = NULL;
 	clear_bit(0, &fdc_busy);
 	if (current_req || set_next_request())
-		do_fd_request(current_req->q);
+		do_fd_request(current_req->queue_ctx->queue);
 	spin_unlock_irqrestore(&floppy_lock, flags);
 	wake_up(&fdc_wait);
 }
@@ -2228,7 +2229,7 @@ static void request_done(int uptodate)
 		return;
 	}
 
-	q = req->q;
+	q = req->queue_ctx->queue;
 
 	if (uptodate) {
 		/* maintain values for invalidation on geometry

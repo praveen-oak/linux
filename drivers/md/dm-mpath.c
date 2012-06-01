@@ -395,7 +395,7 @@ static int map_io(struct multipath *m, struct request *clone,
 		r = DM_MAPIO_SUBMITTED;
 	} else if (pgpath) {
 		bdev = pgpath->path.dev->bdev;
-		clone->q = bdev_get_queue(bdev);
+		clone->queue_ctx->queue = bdev_get_queue(bdev);
 		clone->rq_disk = bdev->bd_disk;
 	} else if (__must_push_back(m))
 		r = DM_MAPIO_REQUEUE;
