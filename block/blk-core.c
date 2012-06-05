@@ -305,6 +305,9 @@ void __blk_run_queue(struct request_queue *q)
 	if (unlikely(blk_queue_stopped(q)))
 		return;
 
+//	if (raw_smp_processor_id() > 0)
+//		printk("RUNNING REQUEST_FN FROM: %i", raw_smp_processor_id());
+
 	q->request_fn(q);
 }
 EXPORT_SYMBOL(__blk_run_queue);
@@ -459,8 +462,8 @@ static int blk_init_queue_ctx(struct request_queue *q, unsigned int nr_queues)
 		memset(ctx, 0, sizeof(*ctx));
 		spin_lock_init(&ctx->lock);
 		ctx->queue = q;
-		init_waitqueue_head(&rl->wait[BLK_RW_SYNC]);
 		init_waitqueue_head(&rl->wait[BLK_RW_ASYNC]);
+		init_waitqueue_head(&rl->wait[BLK_RW_SYNC]);
 		INIT_LIST_HEAD(&ctx->timeout_list);
 	}
 
@@ -482,7 +485,7 @@ static int blk_init_free_list(struct request_queue *q)
 
 struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 {
-	return blk_alloc_queue_node(gfp_mask, -1, 1);
+	return blk_alloc_queue_node(gfp_mask, -1, nr_cpu_ids);
 }
 EXPORT_SYMBOL(blk_alloc_queue);
 
@@ -497,6 +500,8 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id,
 				gfp_mask | __GFP_ZERO, node_id);
 	if (!q)
 		return NULL;
+
+	printk("I for one, allocate some request_ctx's 4 real!\n");
 
 	q->queue_ctx = kmalloc_node(nr_queues * sizeof(struct blk_queue_ctx),
 					GFP_KERNEL, node_id);
@@ -591,7 +596,7 @@ EXPORT_SYMBOL(blk_alloc_queue_node);
 
 struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 {
-	return blk_init_queue_node(rfn, lock, -1, 1);
+	return blk_init_queue_node(rfn, lock, -1, nr_cpu_ids);
 }
 EXPORT_SYMBOL(blk_init_queue);
 
@@ -774,7 +779,7 @@ static bool blk_rq_should_init_elevator(struct bio *bio)
  * Get a free request from @q.  This function may fail under memory
  * pressure or if @q is dead.
  *
- * Must be callled with @ctx->lock held.
+ * Must be called with @ctx->lock held.
  */
 static struct request *get_request(struct blk_queue_ctx *ctx, int rw_flags,
 				   struct bio *bio, gfp_t gfp_mask)
@@ -939,7 +944,7 @@ static struct request *get_request_wait(struct blk_queue_ctx *ctx, int rw_flags,
 
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 {
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, 0);
+	struct blk_queue_ctx *ctx = blk_get_ctx(q, raw_smp_processor_id());
 	struct request *rq;
 
 	BUG_ON(rw != READ && rw != WRITE);
@@ -1248,7 +1253,7 @@ static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	list_for_each_entry_reverse(rq, &plug->list, queuelist) {
 		int el_ret;
 
-		if (rq->q == q)
+		if (rq->queue_ctx->queue == q)
 			(*request_count)++;
 
 		if (rq->queue_ctx->queue != q || !blk_rq_merge_ok(rq, bio))
@@ -1286,7 +1291,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 void blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	const bool sync = !!(bio->bi_rw & REQ_SYNC);
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, 0);
+	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id());
 	struct blk_plug *plug;
 	int el_ret, rw_flags, where = ELEVATOR_INSERT_SORT;
 	struct request *req;

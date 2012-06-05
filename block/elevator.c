@@ -237,7 +237,8 @@ int elevator_init(struct request_queue *q, char *name)
 	if (!eq)
 		return -ENOMEM;
 
-	err = elevator_init_queue(q, eq, 1);
+	printk("I'm called here because I like to switch and initialize at the same time... woohoo------\n");
+	err = elevator_init_queue(q, eq, nr_cpu_ids);
 	if (err) {
 		kobject_put(&eq->kobj);
 		return err;
@@ -384,7 +385,6 @@ void elv_dispatch_sort(struct request_queue *q, struct blk_queue_ctx *ctx,
 	struct list_head *entry;
 	int stop_flags;
 
-	assert_spin_locked(&ctx->lock);
 	assert_spin_locked(&ctx->lock);
 
 	if (ctx->last_merge == rq)
@@ -979,7 +979,8 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 	if (!e)
 		return -ENOMEM;
 
-	err = elevator_init_queue(q, e, 1);
+	printk("What about me? I want to be called too?\n");
+	err = elevator_init_queue(q, e, nr_cpu_ids);
 	if (err) {
 		kobject_put(&e->kobj);
 		return err;

@@ -25,7 +25,7 @@ struct blk_queue_ctx {
 	/*
 	 * the queue request freelist, one for reads and one for writes
 	 */
-	struct request_list	rl;
+	struct request_list	 rl;
 
 	unsigned int		nr_sorted;
 	unsigned int		in_flight[2];
@@ -41,8 +41,13 @@ static inline struct blk_queue_ctx *blk_get_ctx(struct request_queue *q, int nr)
 	return &q->queue_ctx[nr];
 }
 
+static inline int blk_get_queue_execute_id(void)
+{
+	return raw_smp_processor_id();
+}
+
 #define queue_for_each_ctx(q, ctx, i)					\
-	for (i = 0, ctx = &(q)->queue_ctx[0];				\
+	for (i = 0, ctx = &(q)->queue_ctx[i];				\
 		i < (q)->nr_queues; i++, ctx++)				\
 
 #define blk_ctx_sum(q, sum)						\
