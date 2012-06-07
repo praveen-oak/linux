@@ -49,11 +49,10 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 			   rq_end_io_fn *done)
 {
 	int where = at_head ? ELEVATOR_INSERT_FRONT : ELEVATOR_INSERT_BACK;
+	unsigned long flags;
 	struct blk_queue_ctx *ctx;
 
 	WARN_ON(irqs_disabled());
-
-	ctx = blk_get_ctx(q, raw_smp_processor_id());
 
 	if (unlikely(blk_queue_dead(q))) {
 		rq->errors = -ENXIO;
@@ -65,7 +64,15 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	rq->rq_disk = bd_disk;
 	rq->end_io = done;
 
-	spin_lock_irq(&ctx->lock);
+	local_irq_save(flags);
+	local_irq_disable();
+
+	ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
+
+	if (ctx->queue->nr_queues > 1 && ctx->queue_num != raw_smp_processor_id())
+		printk("-- Not expected. ctx->queue_num != raw_smp_processor_id() %i != %i", ctx->queue_num, raw_smp_processor_id());
+
+	spin_lock(&ctx->lock);
 	__elv_add_request(rq, where);
 	spin_unlock(&ctx->lock);
 
@@ -74,7 +81,10 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	/* the queue is stopped so it won't be run */
 	if (rq->cmd_type == REQ_TYPE_PM_RESUME)
 		q->request_fn(q);
-	spin_unlock_irq(q->queue_lock);
+	spin_unlock(q->queue_lock);
+
+	local_irq_restore(flags);
+	local_irq_enable();
 }
 EXPORT_SYMBOL_GPL(blk_execute_rq_nowait);
 

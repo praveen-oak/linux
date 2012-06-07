@@ -463,7 +463,7 @@ static int __devinit virtblk_probe(struct virtio_device *vdev)
 		goto out_mempool;
 	}
 
-	q = vblk->disk->queue = blk_init_queue(do_virtblk_request, &vblk->lock);
+	q = vblk->disk->queue = blk_init_queue_mq(do_virtblk_request, &vblk->lock, (unsigned int)nr_cpu_ids);
 	if (!q) {
 		err = -ENOMEM;
 		goto out_put_disk;

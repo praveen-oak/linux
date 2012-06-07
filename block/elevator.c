@@ -237,8 +237,8 @@ int elevator_init(struct request_queue *q, char *name)
 	if (!eq)
 		return -ENOMEM;
 
-	printk("I'm called here because I like to switch and initialize at the same time... woohoo------\n");
-	err = elevator_init_queue(q, eq, nr_cpu_ids);
+	printk("Initalized noop scheduler with q->nr_queues: %i\n", q->nr_queues);
+	err = elevator_init_queue(q, eq, q->nr_queues);
 	if (err) {
 		kobject_put(&eq->kobj);
 		return err;
@@ -583,10 +583,18 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 	 */
 	if (blk_account_rq(rq)) {
 		struct blk_queue_ctx *ctx = rq->queue_ctx;
+		struct blk_queue_ctx *ctx2 = q->queue_ctx;
+
+		if (ctx != ctx2)
+			spin_lock(&ctx2->lock);
 
 		spin_lock(&ctx->lock);
+
 		ctx->in_flight[rq_is_sync(rq)]--;
 		spin_unlock(&ctx->lock);
+
+		if (ctx != ctx2)
+			spin_unlock(&ctx2->lock);
 
 		if (rq->cmd_flags & REQ_SORTED)
 			elv_deactivate_rq(rq);
@@ -594,7 +602,13 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 
 	rq->cmd_flags &= ~REQ_STARTED;
 
-	__elv_add_request(rq, ELEVATOR_INSERT_REQUEUE);
+	elv_add_request(rq, ELEVATOR_INSERT_REQUEUE);
+	/*
+	 *  Taken out temporary. At the elv_requeue_request time, no
+	 *  queue_ctx lock is set. We instead call the real function
+	 *  to do the required locking of queue_ctx.
+	 */
+	//elv_add_request(rq, ELEVATOR_INSERT_REQUEUE);
 }
 
 void elv_drain_elevator(struct request_queue *q)
@@ -638,6 +652,7 @@ void elv_quiesce_end(struct request_queue *q)
 
 void __elv_add_request(struct request *rq, int where)
 {
+	//printk("Calling __elv_add_request\n");
 	struct blk_queue_ctx *ctx = rq->queue_ctx;
 	struct request_queue *q = ctx->queue;
 
@@ -979,8 +994,7 @@ static int elevator_switch(struct request_queue *q, struct elevator_type *new_e)
 	if (!e)
 		return -ENOMEM;
 
-	printk("What about me? I want to be called too?\n");
-	err = elevator_init_queue(q, e, nr_cpu_ids);
+	err = elevator_init_queue(q, e, q->nr_queues);
 	if (err) {
 		kobject_put(&e->kobj);
 		return err;

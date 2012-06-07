@@ -88,7 +88,7 @@ static int noop_init_queue(struct request_queue *q, unsigned int nr_queues)
 	struct noop_data *nd;
 	unsigned int i;
 
-	printk("Initializing noop_init_queue with %i queues\n", nr_queues);
+	printk("Initializing noop_init_queue with %i queue(s)\n", nr_queues);
 	for (i = 0; i < nr_queues; i++) {
 		nd = kmalloc_node(sizeof(*nd), GFP_KERNEL, q->node);
 		if (!nd)

@@ -31,6 +31,12 @@ struct blk_queue_ctx {
 	unsigned int		in_flight[2];
 
 	struct list_head	timeout_list;
+
+	/*
+	 * Used for debugging purposes to track if we retrieved the queue for the
+	 * processor that we will be executing the queue on.
+	 */
+	unsigned int 		queue_num;
 };
 
 
@@ -41,9 +47,14 @@ static inline struct blk_queue_ctx *blk_get_ctx(struct request_queue *q, int nr)
 	return &q->queue_ctx[nr];
 }
 
-static inline int blk_get_queue_execute_id(void)
+static inline int blk_get_queue_execute_id(struct request_queue *q)
 {
-	return raw_smp_processor_id();
+	BUG_ON(!q->nr_queues);
+
+	if (q->nr_queues == 1)
+		return 0;
+	else
+		return raw_smp_processor_id();
 }
 
 #define queue_for_each_ctx(q, ctx, i)					\

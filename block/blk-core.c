@@ -465,6 +465,9 @@ static int blk_init_queue_ctx(struct request_queue *q, unsigned int nr_queues)
 		init_waitqueue_head(&rl->wait[BLK_RW_ASYNC]);
 		init_waitqueue_head(&rl->wait[BLK_RW_SYNC]);
 		INIT_LIST_HEAD(&ctx->timeout_list);
+
+		// Debugging purposes. Remove later
+		ctx->queue_num = i;
 	}
 
 	return 0;
@@ -485,7 +488,7 @@ static int blk_init_free_list(struct request_queue *q)
 
 struct request_queue *blk_alloc_queue(gfp_t gfp_mask)
 {
-	return blk_alloc_queue_node(gfp_mask, -1, nr_cpu_ids);
+	return blk_alloc_queue_node(gfp_mask, -1, 1);
 }
 EXPORT_SYMBOL(blk_alloc_queue);
 
@@ -501,7 +504,7 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id,
 	if (!q)
 		return NULL;
 
-	printk("I for one, allocate some request_ctx's 4 real!\n");
+	printk("I for one, allocate some request_ctx's real!\n");
 
 	q->queue_ctx = kmalloc_node(nr_queues * sizeof(struct blk_queue_ctx),
 					GFP_KERNEL, node_id);
@@ -596,13 +599,14 @@ EXPORT_SYMBOL(blk_alloc_queue_node);
 
 struct request_queue *blk_init_queue(request_fn_proc *rfn, spinlock_t *lock)
 {
-	return blk_init_queue_node(rfn, lock, -1, nr_cpu_ids);
+	return blk_init_queue_node(rfn, lock, -1, 1);
 }
 EXPORT_SYMBOL(blk_init_queue);
 
 struct request_queue *blk_init_queue_mq(request_fn_proc *rfn, spinlock_t *lock,
 					unsigned int nr_queues)
 {
+	printk("blk_init_queue_node(rfn, lock, -1, nr_queues) ----------\n");
 	return blk_init_queue_node(rfn, lock, -1, nr_queues);
 }
 EXPORT_SYMBOL(blk_init_queue_mq);
@@ -944,7 +948,7 @@ static struct request *get_request_wait(struct blk_queue_ctx *ctx, int rw_flags,
 
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 {
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, raw_smp_processor_id());
+	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
 	struct request *rq;
 
 	BUG_ON(rw != READ && rw != WRITE);
@@ -1291,7 +1295,7 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 void blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	const bool sync = !!(bio->bi_rw & REQ_SYNC);
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id());
+	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
 	struct blk_plug *plug;
 	int el_ret, rw_flags, where = ELEVATOR_INSERT_SORT;
 	struct request *req;
