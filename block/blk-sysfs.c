@@ -54,7 +54,7 @@ queue_requests_store(struct request_queue *q, const char *page, size_t count)
 	if (nr < BLKDEV_MIN_RQ)
 		nr = BLKDEV_MIN_RQ;
 
-	ctx = blk_get_ctx(q, 0);
+	ctx = blk_get_ctx(q, raw_smp_processor_id());
 	rl = &ctx->rl;
 
 	spin_lock_irq(q->queue_lock);

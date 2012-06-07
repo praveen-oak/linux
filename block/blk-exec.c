@@ -53,8 +53,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 
 	WARN_ON(irqs_disabled());
 
-	/* FIXME */
-	ctx = blk_get_ctx(q, 0);
+	ctx = blk_get_ctx(q, raw_smp_processor_id());
 
 	if (unlikely(blk_queue_dead(q))) {
 		rq->errors = -ENXIO;
@@ -65,6 +64,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 
 	rq->rq_disk = bd_disk;
 	rq->end_io = done;
+
 	spin_lock_irq(&ctx->lock);
 	__elv_add_request(rq, where);
 	spin_unlock(&ctx->lock);

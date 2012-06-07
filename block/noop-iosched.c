@@ -29,34 +29,24 @@ static int noop_dispatch(struct request_queue *q, int force)
 	/*
 	 * This obviously needs to me made more clever...
 	 */
-	printk("BOOM0");
 	queue_for_each_ctx(q, ctx, i) {
 		struct request *rq;
 
-		printk("BOOM1");
 		nd = ctx->elevator_data;
 
 		if (list_empty(&nd->queue))
 		{
-			printk("The list is empty\n");
 			continue;
 		}
-
-
-		printk("BOOM2");
 
 		spin_lock(&ctx->lock);
 
 		rq = list_entry(nd->queue.next, struct request, queuelist);
-
-		printk("BOOM3");
-
 		list_del_init(&rq->queuelist);
 
 		BUG_ON(rq->queue_ctx != ctx);
 
 		elv_dispatch_sort(q, ctx, rq);
-
 
 		spin_unlock(&ctx->lock);
 		dispatched++;
