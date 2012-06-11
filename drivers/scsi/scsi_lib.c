@@ -157,9 +157,11 @@ static int __scsi_queue_insert(struct scsi_cmnd *cmd, int reason, int unbusy)
 	 * Requeue this command.  It will go before all other commands
 	 * that are already in the queue.
 	 */
-	spin_lock_irqsave(q->queue_lock, flags);
+	//spin_lock_irqsave(q->queue_lock, flags);
+	spin_lock_irqsave(&q->queue_ctx->lock, flags);
 	blk_requeue_request(q, cmd->request);
-	spin_unlock_irqrestore(q->queue_lock, flags);
+	spin_unlock_irqrestore(&q->queue_ctx->lock, flags);
+	//spin_unlock_irqrestore(q->queue_lock, flags);
 
 	kblockd_schedule_work(q, &device->requeue_work);
 
@@ -1599,8 +1601,12 @@ static void scsi_request_fn(struct request_queue *q)
 	 * cases (host limits or settings) should run the queue at some
 	 * later time.
 	 */
-	spin_lock_irq(q->queue_lock);
+
+	spin_lock_irq(&q->queue_ctx->lock);
 	blk_requeue_request(q, req);
+	spin_unlock_irq(&q->queue_ctx->lock);
+
+	spin_lock_irq(q->queue_lock);
 	sdev->device_busy--;
 out_delay:
 	if (sdev->device_busy == 0)

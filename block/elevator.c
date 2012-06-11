@@ -584,11 +584,11 @@ void elv_requeue_request(struct request_queue *q, struct request *rq)
 	if (blk_account_rq(rq)) {
 		struct blk_queue_ctx *ctx = rq->queue_ctx;
 
-		spin_lock(&ctx->lock);
+		//spin_lock(&ctx->lock);
 
 		ctx->in_flight[rq_is_sync(rq)]--;
 
-		spin_unlock(&ctx->lock);
+		//spin_unlock(&ctx->lock);
 
 		if (rq->cmd_flags & REQ_SORTED)
 			elv_deactivate_rq(rq);
