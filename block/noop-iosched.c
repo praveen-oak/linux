@@ -35,9 +35,7 @@ static int noop_dispatch(struct request_queue *q, int force)
 		nd = ctx->elevator_data;
 
 		if (list_empty(&nd->queue))
-		{
 			continue;
-		}
 
 		spin_lock(&ctx->lock);
 

@@ -305,9 +305,6 @@ void __blk_run_queue(struct request_queue *q)
 	if (unlikely(blk_queue_stopped(q)))
 		return;
 
-//	if (raw_smp_processor_id() > 0)
-//		printk("RUNNING REQUEST_FN FROM: %i", raw_smp_processor_id());
-
 	q->request_fn(q);
 }
 EXPORT_SYMBOL(__blk_run_queue);
@@ -462,8 +459,8 @@ static int blk_init_queue_ctx(struct request_queue *q, unsigned int nr_queues)
 		memset(ctx, 0, sizeof(*ctx));
 		spin_lock_init(&ctx->lock);
 		ctx->queue = q;
-		init_waitqueue_head(&rl->wait[BLK_RW_ASYNC]);
 		init_waitqueue_head(&rl->wait[BLK_RW_SYNC]);
+		init_waitqueue_head(&rl->wait[BLK_RW_ASYNC]);
 		INIT_LIST_HEAD(&ctx->timeout_list);
 
 		// Debugging purposes. Remove later
@@ -503,8 +500,6 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id,
 				gfp_mask | __GFP_ZERO, node_id);
 	if (!q)
 		return NULL;
-
-	printk("I for one, allocate some request_ctx's real!\n");
 
 	q->queue_ctx = kmalloc_node(nr_queues * sizeof(struct blk_queue_ctx),
 					GFP_KERNEL, node_id);
@@ -606,7 +601,7 @@ EXPORT_SYMBOL(blk_init_queue);
 struct request_queue *blk_init_queue_mq(request_fn_proc *rfn, spinlock_t *lock,
 					unsigned int nr_queues)
 {
-	printk("blk_init_queue_node(rfn, lock, -1, nr_queues) ----------\n");
+	printk(KERN_INFO "blk_init_queue_node(rfn, lock, -1, nr_queues) ----------\n");
 	return blk_init_queue_node(rfn, lock, -1, nr_queues);
 }
 EXPORT_SYMBOL(blk_init_queue_mq);

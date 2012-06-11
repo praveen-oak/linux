@@ -76,6 +76,8 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	__elv_add_request(rq, where);
 	spin_unlock(&ctx->lock);
 
+	printk("%i", raw_smp_processor_id());
+
 	spin_lock(q->queue_lock);
 	__blk_run_queue(q);
 	/* the queue is stopped so it won't be run */
