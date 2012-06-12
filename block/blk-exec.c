@@ -64,10 +64,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	rq->rq_disk = bd_disk;
 	rq->end_io = done;
 
-	local_irq_save(flags);
-	local_irq_disable();
-
-	ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
+	ctx = blk_get_ctx(q, &flags);
 
 	if (ctx->queue->nr_queues > 1 && ctx->queue_num != raw_smp_processor_id())
 		printk("-- Not expected. ctx->queue_num != raw_smp_processor_id() %i != %i", ctx->queue_num, raw_smp_processor_id());
@@ -76,7 +73,7 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 	__elv_add_request(rq, where);
 	spin_unlock(&ctx->lock);
 
-	printk("%i", raw_smp_processor_id());
+	//printk("%i", raw_smp_processor_id());
 
 	spin_lock(q->queue_lock);
 	__blk_run_queue(q);
@@ -85,8 +82,8 @@ void blk_execute_rq_nowait(struct request_queue *q, struct gendisk *bd_disk,
 		q->request_fn(q);
 	spin_unlock(q->queue_lock);
 
-	local_irq_restore(flags);
-	local_irq_enable();
+	blk_put_ctx(&flags);
+
 }
 EXPORT_SYMBOL_GPL(blk_execute_rq_nowait);
 

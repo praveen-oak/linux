@@ -646,7 +646,7 @@ extern int sg_scsi_ioctl(struct request_queue *, struct gendisk *, fmode_t,
 extern void blk_queue_bio(struct request_queue *q, struct bio *bio);
 
 /*
- * A queue has just exitted congestion.  Note this in the global counter of
+ * A queue has just exited congestion.  Note this in the global counter of
  * congested queues, and wake up anyone who was waiting for requests to be
  * put back.
  */
@@ -657,7 +657,7 @@ static inline void blk_clear_queue_congested(struct request_queue *q, int sync)
 
 /*
  * A queue has just entered congestion.  Flag that in the queue's VM-visible
- * state flags and increment the global gounter of congested queues.
+ * state flags and increment the global counter of congested queues.
  */
 static inline void blk_set_queue_congested(struct request_queue *q, int sync)
 {

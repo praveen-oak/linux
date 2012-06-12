@@ -943,19 +943,22 @@ static struct request *get_request_wait(struct blk_queue_ctx *ctx, int rw_flags,
 
 struct request *blk_get_request(struct request_queue *q, int rw, gfp_t gfp_mask)
 {
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
+	unsigned long flags;
+	struct blk_queue_ctx *ctx = blk_get_ctx(q, &flags);
 	struct request *rq;
 
 	BUG_ON(rw != READ && rw != WRITE);
 
-	spin_lock_irq(&ctx->lock);
+	spin_lock(&ctx->lock);
 
 	if (gfp_mask & __GFP_WAIT)
 		rq = get_request_wait(ctx, rw, NULL);
 	else
 		rq = get_request(ctx, rw, NULL, gfp_mask);
 
-	spin_unlock_irq(&ctx->lock);
+	spin_unlock(&ctx->lock);
+
+	blk_put_ctx(&flags);
 	return rq;
 }
 EXPORT_SYMBOL(blk_get_request);
@@ -1290,12 +1293,12 @@ void init_request_from_bio(struct request *req, struct bio *bio)
 void blk_queue_bio(struct request_queue *q, struct bio *bio)
 {
 	const bool sync = !!(bio->bi_rw & REQ_SYNC);
-	struct blk_queue_ctx *ctx = blk_get_ctx(q, blk_get_queue_execute_id(q));
+	struct blk_queue_ctx *ctx;
 	struct blk_plug *plug;
 	int el_ret, rw_flags, where = ELEVATOR_INSERT_SORT;
 	struct request *req;
 	unsigned int request_count = 0;
-
+	unsigned long flags;
 	/*
 	 * low level driver can indicate that it wants pages above a
 	 * certain limit bounced to low memory (ie for highmem, or even
@@ -1303,8 +1306,9 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 */
 	blk_queue_bounce(q, &bio);
 
+	ctx = blk_get_ctx(q, &flags);
 	if (bio->bi_rw & (REQ_FLUSH | REQ_FUA)) {
-		spin_lock_irq(&ctx->lock);
+		spin_lock(&ctx->lock);
 		where = ELEVATOR_INSERT_FLUSH;
 		goto get_rq;
 	}
@@ -1316,7 +1320,7 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	if (attempt_plug_merge(q, bio, &request_count))
 		return;
 
-	spin_lock_irq(&ctx->lock);
+	spin_lock(&ctx->lock);
 
 	el_ret = elv_merge(ctx, &req, bio);
 	if (el_ret == ELEVATOR_BACK_MERGE) {
@@ -1325,7 +1329,8 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 			if (!attempt_back_merge(ctx, req))
 				elv_merged_request(ctx, req, el_ret);
 out_unlock:
-			spin_unlock_irq(&ctx->lock);
+			spin_unlock(&ctx->lock);
+			blk_put_ctx(&flags);
 			return;
 		}
 	} else if (el_ret == ELEVATOR_FRONT_MERGE) {
@@ -1357,8 +1362,8 @@ get_rq:
 		goto out_unlock;
 	}
 
-	spin_unlock_irq(&ctx->lock);
-
+	spin_unlock(&ctx->lock);
+	blk_put_ctx(&flags);
 	/*
 	 * After dropping the lock and possibly sleeping here, our request
 	 * may now be mergeable after it had proven unmergeable (above).
@@ -1398,7 +1403,8 @@ get_rq:
 	} else {
 		spin_lock_irq(q->queue_lock);
 		add_acct_request(req, where);
-		__blk_run_queue(q);
+		//__blk_run_queue(q);
+		blk_run_queue_async(q);
 		spin_unlock_irq(q->queue_lock);
 	}
 }

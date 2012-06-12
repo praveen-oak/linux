@@ -39,22 +39,24 @@ struct blk_queue_ctx {
 	unsigned int 		queue_num;
 };
 
-
-static inline struct blk_queue_ctx *blk_get_ctx(struct request_queue *q, int nr)
+static inline struct blk_queue_ctx *__blk_get_ctx(struct request_queue *q, unsigned int nr)
 {
-	BUG_ON(nr >= q->nr_queues);
+	if (q->nr_queues == 1)
+		return &q->queue_ctx[0];
 
+	BUG_ON (nr >= q->nr_queues);
 	return &q->queue_ctx[nr];
 }
 
-static inline int blk_get_queue_execute_id(struct request_queue *q)
+static inline struct blk_queue_ctx *blk_get_ctx(struct request_queue *q, unsigned long *flags)
 {
-	BUG_ON(!q->nr_queues);
+	local_irq_save(*flags);
+	return __blk_get_ctx(q, smp_processor_id());
+}
 
-	if (q->nr_queues == 1)
-		return 0;
-	else
-		return raw_smp_processor_id();
+static inline void blk_put_ctx(unsigned long *flags)
+{
+	local_irq_restore(*flags);
 }
 
 #define queue_for_each_ctx(q, ctx, i)					\

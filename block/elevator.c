@@ -126,6 +126,7 @@ static int elevator_init_queue(struct request_queue *q,
 			       unsigned int nr_queues)
 {
 	unsigned int i, j, hash_size;
+	unsigned long flags;
 	struct blk_queue_ctx *ctx;
 	int ret;
 
@@ -146,10 +147,12 @@ static int elevator_init_queue(struct request_queue *q,
 	q->nr_queues = i;
 	return 0;
 err:
+	local_irq_save(flags);
 	while (i--) {
-		ctx = blk_get_ctx(q, i);
+		ctx = __blk_get_ctx(q, i);
 		kfree(ctx->hash);
 	}
+	local_irq_restore(flags);
 
 	return -ENOMEM;
 }

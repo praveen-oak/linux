@@ -41,7 +41,7 @@ queue_requests_store(struct request_queue *q, const char *page, size_t count)
 {
 	struct blk_queue_ctx *ctx;
 	struct request_list *rl;
-	unsigned long nr;
+	unsigned long nr, flags;
 	int ret;
 
 	if (!q->request_fn)
@@ -54,10 +54,10 @@ queue_requests_store(struct request_queue *q, const char *page, size_t count)
 	if (nr < BLKDEV_MIN_RQ)
 		nr = BLKDEV_MIN_RQ;
 
-	ctx = blk_get_ctx(q, raw_smp_processor_id());
+	ctx = blk_get_ctx(q, &flags);
 	rl = &ctx->rl;
 
-	spin_lock_irq(q->queue_lock);
+	spin_lock(q->queue_lock);
 	q->nr_requests = nr;
 	blk_queue_congestion_threshold(q);
 
@@ -74,7 +74,8 @@ queue_requests_store(struct request_queue *q, const char *page, size_t count)
 	wake_up(&rl->wait[BLK_RW_SYNC]);
 	wake_up(&rl->wait[BLK_RW_ASYNC]);
 
-	spin_unlock_irq(q->queue_lock);
+	spin_unlock(q->queue_lock);
+	blk_put_ctx(&flags);
 	return ret;
 }
 
