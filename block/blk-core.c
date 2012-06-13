@@ -1318,7 +1318,11 @@ void blk_queue_bio(struct request_queue *q, struct bio *bio)
 	 * any locks.
 	 */
 	if (attempt_plug_merge(q, bio, &request_count))
+	{
+		blk_put_ctx(&flags);
 		return;
+	}
+
 
 	spin_lock(&ctx->lock);
 
@@ -1403,8 +1407,7 @@ get_rq:
 	} else {
 		spin_lock_irq(q->queue_lock);
 		add_acct_request(req, where);
-		//__blk_run_queue(q);
-		blk_run_queue_async(q);
+		__blk_run_queue(q);
 		spin_unlock_irq(q->queue_lock);
 	}
 }

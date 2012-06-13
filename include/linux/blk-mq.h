@@ -45,6 +45,7 @@ static inline struct blk_queue_ctx *__blk_get_ctx(struct request_queue *q, unsig
 		return &q->queue_ctx[0];
 
 	BUG_ON (nr >= q->nr_queues);
+
 	return &q->queue_ctx[nr];
 }
 

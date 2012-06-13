@@ -26,6 +26,8 @@ static int noop_dispatch(struct request_queue *q, int force)
 	struct noop_data *nd;
 	unsigned int i, dispatched = 0;
 
+	//dump_stack();
+
 	/*
 	 * This obviously needs to me made more clever...
 	 */
