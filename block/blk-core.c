@@ -47,7 +47,7 @@ DEFINE_IDA(blk_queue_ida);
 /*
  * For the allocated request tables
  */
-static struct kmem_cache *request_cachep;
+struct kmem_cache *request_cachep = NULL;
 
 /*
  * For queue allocation
@@ -1340,8 +1340,8 @@ void blk_add_request_payload(struct request *rq, struct page *page,
 }
 EXPORT_SYMBOL_GPL(blk_add_request_payload);
 
-static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
-				   struct bio *bio)
+bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
+			    struct bio *bio)
 {
 	const int ff = bio->bi_rw & REQ_FAILFAST_MASK;
 
@@ -1362,8 +1362,8 @@ static bool bio_attempt_back_merge(struct request_queue *q, struct request *req,
 	return true;
 }
 
-static bool bio_attempt_front_merge(struct request_queue *q,
-				    struct request *req, struct bio *bio)
+bool bio_attempt_front_merge(struct request_queue *q, struct request *req,
+			     struct bio *bio)
 {
 	const int ff = bio->bi_rw & REQ_FAILFAST_MASK;
 
