@@ -3895,6 +3895,7 @@ static struct blk_mq_reg mtip_mq_reg = {
 	.nr_hw_queues	= 1,
 	.queue_depth	= 256,
 	.numa_node	= NUMA_NO_NODE,
+	.flags		= BLK_MQ_F_SHOULD_MERGE,
 };
 
 /*
