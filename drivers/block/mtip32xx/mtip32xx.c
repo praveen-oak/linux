@@ -3973,7 +3973,7 @@ static int mtip_block_initialize(struct driver_data *dd)
 
 skip_create_disk:
 	/* Allocate the request queue. */
-	dd->queue = blk_mq_init_queue(&mtip_mq_reg);
+	dd->queue = blk_mq_init_queue(&mtip_mq_reg, NULL);
 	if (dd->queue == NULL) {
 		dev_err(&dd->pdev->dev,
 			"Unable to allocate request queue\n");
