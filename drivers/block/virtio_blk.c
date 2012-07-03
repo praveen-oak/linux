@@ -107,7 +107,6 @@ static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
 {
 	unsigned long num, out = 0, in = 0;
 	struct virtblk_req *vbr;
-	unsigned long flags;
 
 	vbr = mempool_alloc(vblk->pool, GFP_ATOMIC);
 	if (!vbr)
@@ -175,29 +174,26 @@ static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
 		}
 	}
 
-	spin_lock_irqsave(&vblk->lock, flags);
 	if (virtqueue_add_buf(vblk->vq, vblk->sg, out, in, vbr, GFP_ATOMIC)<0) {
 		mempool_free(vbr, vblk->pool);
-		spin_unlock_irqrestore(&vblk->lock, flags);
 		return false;
 	}
-	spin_unlock_irqrestore(&vblk->lock, flags);
 
 	return true;
 }
 
 static int do_virtblk_submit_request(struct request_queue *q, struct request *rq)
 {
+	const int last = rq->cmd_flags & REQ_END;
 	struct virtio_blk *vblk = q->queuedata;
 	int ret;
-	unsigned long flags;
 
 	BUG_ON(rq->nr_phys_segments +2 > vblk->sg_elems);
 
-	if ((ret = do_req(q, vblk, rq))) {
-		spin_lock_irqsave(&vblk->lock, flags);
-		virtqueue_kick(vblk->vq);
-		spin_unlock_irqrestore(&vblk->lock, flags);
+	ret = do_req(q, vblk, rq);
+	if (ret) {
+		if (last)
+			virtqueue_kick(vblk->vq);
 		return BLK_MQ_RQ_QUEUE_OK;
 	}
 
@@ -414,11 +410,11 @@ static struct blk_mq_ops virtio_mq_ops = {
 };
 
 static struct blk_mq_reg virtio_mq_reg = {
-       .ops            = &virtio_mq_ops,
-       .nr_hw_queues   = 1,
-       .queue_depth    = 1,
-       .numa_node      = NUMA_NO_NODE,
-	.flags		= BLK_MQ_F_SHOULD_MERGE,
+	.ops		= &virtio_mq_ops,
+	.nr_hw_queues	= 1,
+	.queue_depth	= 1,
+	.numa_node	= NUMA_NO_NODE,
+	.flags		= BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SHOULD_LOCK,
 };
 
 static int __devinit virtblk_probe(struct virtio_device *vdev)
@@ -480,7 +476,7 @@ static int __devinit virtblk_probe(struct virtio_device *vdev)
 		goto out_mempool;
 	}
 
-	q = vblk->disk->queue = blk_mq_init_queue(&virtio_mq_reg);
+	q = vblk->disk->queue = blk_mq_init_queue(&virtio_mq_reg, &vblk->lock);
 	if (!q) {
 		err = -ENOMEM;
 		goto out_put_disk;
