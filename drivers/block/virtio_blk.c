@@ -412,7 +412,7 @@ static struct blk_mq_ops virtio_mq_ops = {
 static struct blk_mq_reg virtio_mq_reg = {
 	.ops		= &virtio_mq_ops,
 	.nr_hw_queues	= 1,
-	.queue_depth	= 1,
+	.queue_depth	= 64,
 	.numa_node	= NUMA_NO_NODE,
 	.flags		= BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SHOULD_LOCK,
 };
