@@ -55,6 +55,7 @@ struct virtio_blk
 struct virtblk_req
 {
 	struct request *req;
+	struct blk_mq_hw_ctx *hctx;
 	struct virtio_blk_outhdr out_hdr;
 	struct virtio_scsi_inhdr in_hdr;
 	u8 status;
@@ -96,13 +97,13 @@ static void blk_done(struct virtqueue *vq)
 			break;
 		}
 
-		blk_mq_end_io(vbr->req, error);
+		blk_mq_end_io(vbr->hctx, vbr->req, error);
 		mempool_free(vbr, vblk->pool);
 	}
 	spin_unlock_irqrestore(&vblk->lock, flags);
 }
 
-static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
+static bool do_req(struct blk_mq_hw_ctx *hctx, struct virtio_blk *vblk,
 		   struct request *req)
 {
 	unsigned long num, out = 0, in = 0;
@@ -114,6 +115,7 @@ static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
 		return false;
 
 	vbr->req = req;
+	vbr->hctx = hctx;
 
 	if (req->cmd_flags & REQ_FLUSH) {
 		vbr->out_hdr.type = VIRTIO_BLK_T_FLUSH;
@@ -153,7 +155,7 @@ static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
 	if (vbr->req->cmd_type == REQ_TYPE_BLOCK_PC)
 		sg_set_buf(&vblk->sg[out++], vbr->req->cmd, vbr->req->cmd_len);
 
-	num = blk_rq_map_sg(q, vbr->req, vblk->sg + out);
+	num = blk_rq_map_sg(hctx->queue, vbr->req, vblk->sg + out);
 
 	if (vbr->req->cmd_type == REQ_TYPE_BLOCK_PC) {
 		sg_set_buf(&vblk->sg[num + out + in++], vbr->req->sense, SCSI_SENSE_BUFFERSIZE);
@@ -182,15 +184,15 @@ static bool do_req(struct request_queue *q, struct virtio_blk *vblk,
 	return true;
 }
 
-static int do_virtblk_submit_request(struct request_queue *q, struct request *rq)
+static int do_virtblk_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	const int last = rq->cmd_flags & REQ_END;
-	struct virtio_blk *vblk = q->queuedata;
+	struct virtio_blk *vblk = hctx->queue->queuedata;
 	int ret;
 
 	BUG_ON(rq->nr_phys_segments +2 > vblk->sg_elems);
 
-	ret = do_req(q, vblk, rq);
+	ret = do_req(hctx, vblk, rq);
 	if (ret) {
 		if (last)
 			virtqueue_kick(vblk->vq);
@@ -396,7 +398,7 @@ static int virtio_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	int ret;
 
-	ret = do_virtblk_submit_request(hctx->queue, rq);
+	ret = do_virtblk_submit_request(hctx, rq);
 	if (!ret)
 		return BLK_MQ_RQ_QUEUE_OK;
 

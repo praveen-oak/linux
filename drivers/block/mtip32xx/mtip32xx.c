@@ -167,7 +167,7 @@ static void mtip_command_cleanup(struct driver_data *dd)
 
 			if (atomic_read(&command->active)
 			    && (command->async_callback)) {
-				command->async_callback(command->async_data,
+				command->async_callback(command->hctx, command->async_data,
 					-ENODEV);
 				command->async_callback = NULL;
 				command->async_data = NULL;
@@ -562,7 +562,8 @@ static void mtip_timeout_function(unsigned long int data)
 
 		/* Call the async completion callback. */
 		if (likely(command->async_callback))
-			command->async_callback(command->async_data, -EIO);
+			command->async_callback(command->hctx, command->async_data,
+										 -EIO);
 
 		command->async_callback = NULL;
 		command->comp_func = NULL;
@@ -641,7 +642,7 @@ static void mtip_async_complete(struct mtip_port *port,
 
 	/* Upper layer callback */
 	if (likely(command->async_callback))
-		command->async_callback(command->async_data, cb_status);
+		command->async_callback(command->hctx, command->async_data, cb_status);
 
 	command->async_callback = NULL;
 	command->comp_func = NULL;
@@ -2355,7 +2356,7 @@ static int mtip_hw_ioctl(struct driver_data *dd, unsigned int cmd,
  *	None
  */
 static void mtip_hw_submit_io(struct driver_data *dd, struct request *rq,
-			      unsigned int nents)
+			      unsigned int nents, struct blk_mq_hw_ctx *hctx)
 {
 	struct host_to_dev_fis	*fis;
 	struct mtip_port *port = dd->port;
@@ -2413,6 +2414,7 @@ static void mtip_hw_submit_io(struct driver_data *dd, struct request *rq,
 	 * Set the completion function and data for the command passed
 	 * from the upper layer.
 	 */
+	command->hctx = hctx;
 	command->async_data = rq;
 	command->async_callback = blk_mq_end_io;
 
@@ -3500,9 +3502,9 @@ static const struct block_device_operations mtip_block_ops = {
  * @rq    Pointer to the request
  *
  */
-static int mtip_submit_request(struct request_queue *queue, struct request *rq)
+static int mtip_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
-	struct driver_data *dd = queue->queuedata;
+	struct driver_data *dd = hctx->queue->queuedata;
 	struct scatterlist *sg;
 	unsigned int nents;
 
@@ -3531,10 +3533,10 @@ static int mtip_submit_request(struct request_queue *queue, struct request *rq)
 	}
 
 	/* Create the scatter list for this bio. */
-	nents = blk_rq_map_sg(queue, rq, sg);
+	nents = blk_rq_map_sg(hctx->queue, rq, sg);
 
 	/* Issue the read/write. */
-	mtip_hw_submit_io(dd, rq, nents);
+	mtip_hw_submit_io(dd, rq, nents, hctx);
 	return 0;
 }
 
@@ -3542,7 +3544,7 @@ static int mtip_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	int ret;
 
-	ret = mtip_submit_request(hctx->queue, rq);
+	ret = mtip_submit_request(hctx, rq);
 	if (!ret)
 		return BLK_MQ_RQ_QUEUE_OK;
 
