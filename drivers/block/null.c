@@ -6,17 +6,23 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/blk-mq.h>
+#include <linux/hrtimer.h>
 
 struct nullb {
 	struct list_head list;
 	struct request_queue *q;
 	struct gendisk *disk;
+	struct hrtimer timer;
 	spinlock_t lock;
 };
 
 static LIST_HEAD(nullb_list);
 static struct mutex lock;
 static int null_major;
+
+#define IRQ_NONE 0
+#define IRQ_SOFTIRQ 1
+#define IRQ_TIMER 2
 
 static int submit_queues = 1;
 module_param(submit_queues, int, S_IRUGO);
@@ -48,6 +54,11 @@ MODULE_PARM_DESC(irqmode, "IRQ completion handler. 0-none, 1-softirq, 2-timer");
 
 MODULE_LICENSE("GPL");
 
+static enum hrtimer_restart null_request_timer_expired(struct hrtimer *timer)
+{
+	return HRTIMER_NORESTART;
+}
+
 static void ipi_end_io(void *data)
 {
 	struct request *rq = data;
@@ -72,13 +83,16 @@ static void null_request_mq_end_ipi(struct request *rq)
 
 static inline void null_handle_mq_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
-	/* Complete IO by inline or softirq */
+	/* Complete IO by inline, softirq or timer */
 	switch (irqmode) {
-	case 0:
+	case IRQ_NONE:
 		blk_mq_end_io(hctx, rq, 0);
 		break;
-	case 1:
+	case IRQ_SOFTIRQ:
 		null_request_mq_end_ipi(rq);
+		break;
+	case IRQ_TIMER:
+		blk_mq_end_io(hctx, rq, 0);
 		break;
 	}
 }
@@ -151,6 +165,11 @@ static int null_add_dev(void)
 		return -ENOMEM;
 
 	memset(nullb, 0, sizeof(*nullb));
+
+	if (irqmode == IRQ_TIMER) {
+		hrtimer_init(&nullb->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+		nullb->timer.function = null_request_timer_expired;
+	}
 
 	if (use_mq) {
 		null_mq_reg.numa_node = home_node;
