@@ -159,6 +159,8 @@ static int null_add_dev(void)
 
 static int __init null_init(void)
 {
+	mutex_init(&lock);
+
 	null_major = register_blkdev(0, "nullb");
 	if (null_major < 0)
 		return null_major;
@@ -169,7 +171,7 @@ static int __init null_init(void)
 	}
 
 	printk(KERN_INFO "null: module loaded\n");
-	mutex_init(&lock);
+
 	return 0;
 }
 
