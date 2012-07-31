@@ -36,13 +36,52 @@ MODULE_PARM_DESC(use_mq, "Use blk-mq interface");
 
 static int gb = 250;
 module_param(gb, int, S_IRUGO);
-MODULE_PARM_DESC(use_mq, "Size in GB");
+MODULE_PARM_DESC(gb, "Size in GB");
 
 static int bs = 512;
 module_param(bs, int, S_IRUGO);
-MODULE_PARM_DESC(use_mq, "Block size (in bytes)");
+MODULE_PARM_DESC(bs, "Block size (in bytes)");
+
+static int irqmode = 1;
+module_param(irqmode, int, S_IRUGO);
+MODULE_PARM_DESC(irqmode, "IRQ completion handler. 0-none, 1-softirq, 2-timer");
 
 MODULE_LICENSE("GPL");
+
+static void ipi_end_io(void *data)
+{
+	struct request *rq = data;
+	blk_mq_end_io(rq->q->queue_hw_ctx, rq, 0);
+}
+
+static void null_request_mq_end_ipi(struct request *rq)
+{
+	struct call_single_data *data = &rq->csd;
+	int cpu;
+
+	data->func = ipi_end_io;
+	data->flags = 0;
+	data->info = rq;
+
+	cpu = get_cpu();
+
+	__smp_call_function_single(cpu, data, 0);
+
+	put_cpu();
+}
+
+static inline void null_handle_mq_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	/* Complete IO by inline or softirq */
+	switch (irqmode) {
+	case 0:
+		blk_mq_end_io(hctx, rq, 0);
+		break;
+	case 1:
+		null_request_mq_end_ipi(rq);
+		break;
+	}
+}
 
 static void null_request_fn(struct request_queue *q)
 {
@@ -56,7 +95,7 @@ static void null_request_fn(struct request_queue *q)
 
 static int null_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
-	blk_mq_end_io(hctx, rq, 0);
+	null_handle_mq_rq(hctx, rq);
 	return BLK_MQ_RQ_QUEUE_OK;
 }
 
