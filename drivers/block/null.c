@@ -1,0 +1,176 @@
+#include <linux/module.h>
+#include <linux/moduleparam.h>
+#include <linux/sched.h>
+#include <linux/fs.h>
+#include <linux/blkdev.h>
+#include <linux/init.h>
+#include <linux/slab.h>
+#include <linux/blk-mq.h>
+
+struct nullb {
+	struct list_head list;
+	struct request_queue *q;
+	struct gendisk *disk;
+	spinlock_t lock;
+};
+
+static LIST_HEAD(nullb_list);
+static struct mutex lock;
+static int null_major;
+
+static int submit_queues = 1;
+module_param(submit_queues, int, S_IRUGO);
+MODULE_PARM_DESC(submit_queues, "Number of submission queues");
+
+static int complete_queues = 1;
+module_param(complete_queues, int, S_IRUGO);
+MODULE_PARM_DESC(complete_queues, "Number of completion queues");
+
+static int home_node = NUMA_NO_NODE;
+module_param(home_node, int, S_IRUGO);
+MODULE_PARM_DESC(home_node, "Home node for the device");
+
+static int use_mq = 1;
+module_param(use_mq, int, S_IRUGO);
+MODULE_PARM_DESC(use_mq, "Use blk-mq interface");
+
+static int gb = 250;
+module_param(gb, int, S_IRUGO);
+MODULE_PARM_DESC(use_mq, "Size in GB");
+
+static int bs = 512;
+module_param(bs, int, S_IRUGO);
+MODULE_PARM_DESC(use_mq, "Block size (in bytes)");
+
+MODULE_LICENSE("GPL");
+
+static void null_request_fn(struct request_queue *q)
+{
+}
+
+static int null_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	return BLK_MQ_RQ_QUEUE_OK;
+}
+
+static struct blk_mq_ops null_mq_ops = {
+	.queue_rq       = null_queue_rq,
+	.map_queue      = blk_mq_map_single_queue,
+};
+
+static struct blk_mq_reg null_mq_reg = {
+	.ops		= &null_mq_ops,
+	.nr_hw_queues	= 1,
+	.queue_depth	= 64,
+	.flags		= BLK_MQ_F_SHOULD_MERGE,
+};
+
+static void null_del_dev(struct nullb *nullb)
+{
+	list_del_init(&nullb->list);
+
+	del_gendisk(nullb->disk);
+	if (use_mq)
+		blk_mq_free_queue(nullb->q);
+	else
+		blk_cleanup_queue(nullb->q);
+	put_disk(nullb->disk);
+	kfree(nullb);
+}
+
+static int null_open(struct block_device *bdev, fmode_t mode)
+{
+	return 0;
+}
+
+static int null_release(struct gendisk *disk, fmode_t mode)
+{
+	return 0;
+}
+
+static const struct block_device_operations null_fops = {
+	.owner =	THIS_MODULE,
+	.open =		null_open,
+	.release =	null_release,
+};
+
+static int null_add_dev(void)
+{
+	struct gendisk *disk;
+	struct nullb *nullb;
+
+	nullb = kmalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
+	if (!nullb)
+		return -ENOMEM;
+
+	memset(nullb, 0, sizeof(*nullb));
+
+	if (use_mq) {
+		null_mq_reg.numa_node = home_node;
+		nullb->q = blk_mq_init_queue(&null_mq_reg, &nullb->lock);
+	} else
+		nullb->q = blk_init_queue_node(null_request_fn, &nullb->lock, home_node);
+
+	if (!nullb) {
+		kfree(nullb);
+		return -ENOMEM;
+	}
+
+	disk = nullb->disk = alloc_disk(1);
+	if (!disk) {
+		if (use_mq)
+			blk_mq_free_queue(nullb->q);
+		else
+			blk_cleanup_queue(nullb->q);
+		kfree(nullb);
+		return -ENOMEM;
+	}
+
+	mutex_lock(&lock);
+	list_add_tail(&nullb->list, &nullb_list);
+	mutex_unlock(&lock);
+
+	disk->flags |= GENHD_FL_NO_PART_SCAN | GENHD_FL_EXT_DEVT;
+	spin_lock_init(&nullb->lock);
+	disk->major		= null_major;
+	disk->first_minor	= 0;
+	disk->fops		= &null_fops;
+	disk->private_data	= nullb;
+	disk->queue		= nullb->q;
+	sprintf(disk->disk_name, "nullb%d", 0);
+	add_disk(disk);
+	return 0;
+}
+
+static int __init null_init(void)
+{
+	null_major = register_blkdev(0, "nullb");
+	if (null_major < 0)
+		return null_major;
+
+	if (null_add_dev()) {
+		unregister_blkdev(null_major, "nullb");
+		return -EINVAL;
+	}
+
+	printk(KERN_INFO "null: module loaded\n");
+	mutex_init(&lock);
+	return 0;
+}
+
+static void __exit null_exit(void)
+{
+	struct nullb *nullb;
+
+	unregister_blkdev(null_major, "nullb");
+
+	mutex_lock(&lock);
+	while (!list_empty(&nullb_list)) {
+		nullb = list_entry(nullb_list.next, struct nullb, list);
+		null_del_dev(nullb);
+	}
+	mutex_unlock(&lock);
+}
+
+module_init(null_init);
+module_exit(null_exit);
