@@ -661,6 +661,7 @@ struct request_queue *blk_mq_init_queue(struct blk_mq_reg *reg,
 		hctx->flags = reg->flags;
 		hctx->queue_depth = reg->queue_depth;
 		hctx->numa_node = reg->numa_node;
+		hctx->index = i;
 
 		if (!lock)
 			hctx->lock = &hctx->__lock;

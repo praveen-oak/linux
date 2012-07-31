@@ -39,6 +39,7 @@
 #define VIRTIO_BLK_F_SCSI	7	/* Supports scsi command passthru */
 #define VIRTIO_BLK_F_FLUSH	9	/* Cache flush command support */
 #define VIRTIO_BLK_F_TOPOLOGY	10	/* Topology information is available */
+#define VIRTIO_BLK_F_MQ	11	/* Support for multiple hardware queues */
 
 #define VIRTIO_BLK_ID_BYTES	20	/* ID string length */
 
@@ -68,6 +69,9 @@ struct virtio_blk_config {
 	__u16 min_io_size;
 	/* optimal sustained I/O size in logical blocks. */
 	__u32 opt_io_size;
+
+	/* number of virtual queues (if VIRTIO_BLK_F_MQ)*/
+	__u32 num_vqueues;
 
 } __attribute__((packed));
 

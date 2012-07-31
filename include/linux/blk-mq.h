@@ -50,6 +50,8 @@ struct blk_mq_hw_ctx {
 	unsigned int		queue_depth;
 	unsigned int		numa_node;
 
+	unsigned int		index;
+
 	struct kobject		kobj;
 };
 
