@@ -46,10 +46,17 @@ MODULE_LICENSE("GPL");
 
 static void null_request_fn(struct request_queue *q)
 {
+	struct request *rq;
+
+	while ((rq = blk_fetch_request(q)) != NULL) {
+		blk_start_request(rq);
+		__blk_end_request_all(rq, 0);
+	}
 }
 
 static int null_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
+	blk_mq_end_io(hctx, rq, 0);
 	return BLK_MQ_RQ_QUEUE_OK;
 }
 
@@ -98,6 +105,7 @@ static int null_add_dev(void)
 {
 	struct gendisk *disk;
 	struct nullb *nullb;
+	sector_t size;
 
 	nullb = kmalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
 	if (!nullb)
@@ -116,7 +124,7 @@ static int null_add_dev(void)
 		return -ENOMEM;
 	}
 
-	disk = nullb->disk = alloc_disk(1);
+	disk = nullb->disk = alloc_disk_node(1, home_node);
 	if (!disk) {
 		if (use_mq)
 			blk_mq_free_queue(nullb->q);
@@ -129,6 +137,13 @@ static int null_add_dev(void)
 	mutex_lock(&lock);
 	list_add_tail(&nullb->list, &nullb_list);
 	mutex_unlock(&lock);
+
+	blk_queue_logical_block_size(nullb->q, bs);
+	blk_queue_physical_block_size(nullb->q, bs);
+
+	size = gb * 1024 * 1024 * 1024ULL;
+	size /= (sector_t) bs;
+	set_capacity(disk, size);
 
 	disk->flags |= GENHD_FL_NO_PART_SCAN | GENHD_FL_EXT_DEVT;
 	spin_lock_init(&nullb->lock);
