@@ -116,6 +116,11 @@ static void null_request_mq_end_ipi(struct request *rq)
 	put_cpu();
 }
 
+static void null_request_end_ipi(struct request *rq)
+{
+	blk_end_request_all(rq, 0);
+}
+
 static inline void null_handle_mq_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	/* Complete IO by inline, softirq or timer */
@@ -137,8 +142,7 @@ static void null_request_fn(struct request_queue *q)
 	struct request *rq;
 
 	while ((rq = blk_fetch_request(q)) != NULL) {
-		blk_start_request(rq);
-		__blk_end_request_all(rq, 0);
+		blk_complete_request(rq);
 	}
 }
 
@@ -216,8 +220,11 @@ static int null_add_dev(void)
 	if (use_mq) {
 		null_mq_reg.numa_node = home_node;
 		nullb->q = blk_mq_init_queue(&null_mq_reg, &nullb->lock);
-	} else
+	} else {
 		nullb->q = blk_init_queue_node(null_request_fn, &nullb->lock, home_node);
+		blk_queue_softirq_done(nullb->q, null_request_end_ipi);
+	}
+
 
 	if (!nullb) {
 		kfree(nullb);
