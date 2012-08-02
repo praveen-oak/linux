@@ -61,7 +61,7 @@ static enum hrtimer_restart null_request_timer_expired(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void ipi_mq_end_io(void *data)
+static void null_ipi_mq_end_io(void *data)
 {
 	struct llist_head *list = &per_cpu(ipi_lists, smp_processor_id());
 	struct llist_node *entry;
@@ -81,7 +81,7 @@ static void null_request_mq_end_ipi(struct request *rq)
 	rq->ll_list.next = NULL;
 
 	if (llist_add(&rq->ll_list, &per_cpu(ipi_lists, cpu))) {
-		data->func = ipi_mq_end_io;
+		data->func = null_ipi_mq_end_io;
 		data->flags = 0;
 		__smp_call_function_single(cpu, data, 0);
 	}
