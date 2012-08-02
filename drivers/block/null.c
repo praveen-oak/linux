@@ -20,6 +20,8 @@ static LIST_HEAD(nullb_list);
 static struct mutex lock;
 static int null_major;
 
+static DEFINE_PER_CPU(struct llist_head, ipi_lists);
+
 #define IRQ_NONE 0
 #define IRQ_SOFTIRQ 1
 #define IRQ_TIMER 2
@@ -59,24 +61,30 @@ static enum hrtimer_restart null_request_timer_expired(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-static void ipi_end_io(void *data)
+static void ipi_mq_end_io(void *data)
 {
-	struct request *rq = data;
-	blk_mq_end_io(rq->q->queue_hw_ctx, rq, 0);
+	struct llist_head *list = &per_cpu(ipi_lists, smp_processor_id());
+	struct llist_node *entry;
+	struct request *rq;
+
+	while ((entry = llist_del_first(list)) != NULL) {
+		rq = llist_entry(entry, struct request, ll_list);
+		blk_mq_end_io(rq->q->queue_hw_ctx, rq, 0);
+	}
 }
 
 static void null_request_mq_end_ipi(struct request *rq)
 {
 	struct call_single_data *data = &rq->csd;
-	int cpu;
+	int cpu = get_cpu();
 
-	data->func = ipi_end_io;
-	data->flags = 0;
-	data->info = rq;
+	rq->ll_list.next = NULL;
 
-	cpu = get_cpu();
-
-	__smp_call_function_single(cpu, data, 0);
+	if (llist_add(&rq->ll_list, &per_cpu(ipi_lists, cpu))) {
+		data->func = ipi_mq_end_io;
+		data->flags = 0;
+		__smp_call_function_single(cpu, data, 0);
+	}
 
 	put_cpu();
 }
@@ -158,7 +166,12 @@ static int null_add_dev(void)
 {
 	struct gendisk *disk;
 	struct nullb *nullb;
+	unsigned int i;
 	sector_t size;
+
+	/* Initialize a separate list for each CPU for issuing softirqs */
+	for_each_possible_cpu(i)
+		init_llist_head(&per_cpu(ipi_lists, i));
 
 	nullb = kmalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
 	if (!nullb)
