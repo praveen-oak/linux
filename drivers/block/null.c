@@ -14,6 +14,9 @@ struct nullb {
 	struct gendisk *disk;
 	struct hrtimer timer;
 	spinlock_t lock;
+
+	/* Request list for timer-based approach */
+	struct llist_head timer_requests;
 };
 
 static LIST_HEAD(nullb_list);
@@ -54,11 +57,35 @@ static int irqmode = 1;
 module_param(irqmode, int, S_IRUGO);
 MODULE_PARM_DESC(irqmode, "IRQ completion handler. 0-none, 1-softirq, 2-timer");
 
+static int completion_time = 50000;
+module_param(completion_time, int, S_IRUGO);
+MODULE_PARM_DESC(completion_time, "Time in ns to complete a request in hardware. Default: 50.000ns");
+
+
 MODULE_LICENSE("GPL");
 
 static enum hrtimer_restart null_request_timer_expired(struct hrtimer *timer)
 {
+	struct nullb *blk = list_entry((&nullb_list)->next, struct nullb, list);
+	struct llist_node *entry;
+	struct request *rq;
+
+	while ((entry = llist_del_first(&blk->timer_requests)) != NULL) {
+		rq = llist_entry(entry, struct request, ll_list);
+		blk_mq_end_io(rq->q->queue_hw_ctx, rq, 0);
+	}
+
 	return HRTIMER_NORESTART;
+}
+
+static void null_request_mq_end_timer(struct request *rq)
+{
+	struct nullb *blk = list_entry((&nullb_list)->next, struct nullb, list);
+
+	rq->ll_list.next = NULL;
+	if (llist_add(&rq->ll_list, &blk->timer_requests)) {
+		hrtimer_start(&blk->timer, ktime_set(0, 50000), HRTIMER_MODE_REL);
+	}
 }
 
 static void null_ipi_mq_end_io(void *data)
@@ -100,7 +127,7 @@ static inline void null_handle_mq_rq(struct blk_mq_hw_ctx *hctx, struct request 
 		null_request_mq_end_ipi(rq);
 		break;
 	case IRQ_TIMER:
-		blk_mq_end_io(hctx, rq, 0);
+		null_request_mq_end_timer(rq);
 		break;
 	}
 }
@@ -182,6 +209,8 @@ static int null_add_dev(void)
 	if (irqmode == IRQ_TIMER) {
 		hrtimer_init(&nullb->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 		nullb->timer.function = null_request_timer_expired;
+
+		init_llist_head(&nullb->timer_requests);
 	}
 
 	if (use_mq) {
