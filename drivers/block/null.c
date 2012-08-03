@@ -102,18 +102,13 @@ static void null_ipi_mq_end_io(void *data)
 
 static void null_request_mq_end_ipi(struct request *rq)
 {
-	struct call_single_data *data = &rq->csd;
-	int cpu = get_cpu();
+	int cpu = smp_processor_id();
 
 	rq->ll_list.next = NULL;
 
 	if (llist_add(&rq->ll_list, &per_cpu(ipi_lists, cpu))) {
-		data->func = null_ipi_mq_end_io;
-		data->flags = 0;
-		__smp_call_function_single(cpu, data, 0);
+		smp_call_function_single(cpu, null_ipi_mq_end_io, NULL, 0);
 	}
-
-	put_cpu();
 }
 
 static void null_request_end_ipi(struct request *rq)
