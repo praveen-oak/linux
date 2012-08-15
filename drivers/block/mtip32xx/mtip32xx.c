@@ -3799,6 +3799,8 @@ static int mtip_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 static struct blk_mq_ops mtip_mq_ops = {
 	.queue_rq	= mtip_queue_rq,
 	.map_queue	= blk_mq_map_single_queue,
+	.alloc_hctx	= blk_mq_alloc_single_hw_queue,
+	.free_hctx	= blk_mq_free_single_hw_queue,
 };
 
 static struct blk_mq_reg mtip_mq_reg = {
