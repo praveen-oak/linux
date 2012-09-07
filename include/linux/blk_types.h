@@ -8,6 +8,7 @@
 #ifdef CONFIG_BLOCK
 
 #include <linux/types.h>
+#include <linux/llist.h>
 
 struct bio_set;
 struct bio;
@@ -67,7 +68,11 @@ struct bio {
 
 	bio_end_io_t		*bi_end_io;
 
-	void			*bi_private;
+	union {
+		void			*bi_private;
+		struct llist_node	bi_llist_node;
+	};
+
 #ifdef CONFIG_BLK_CGROUP
 	/*
 	 * Optional ioc and css associated with this bio.  Put on bio
