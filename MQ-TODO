@@ -11,6 +11,10 @@ TODO list for multiqueue/new-queue. In no particular order.
 
 - Barrier support
 
+- Improve the tagging to make it more per-cpu friendly. Things really fall
+  apart if we exhaust our tag map and have to wait. Cache the tags or
+  requests on a per ctx basis, ensuring that it's also fair between ctx's.
+
 - Add token based mq aware IO scheduler
 
 /Jens
