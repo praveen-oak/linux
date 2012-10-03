@@ -442,16 +442,20 @@ static struct llist_node *dio_await_some(struct dio *dio)
 	 * and can call it after testing our condition.
 	 */
 	while (atomic_read(&dio->refcount) > 1) {
+		__set_current_state(TASK_UNINTERRUPTIBLE);
 		ret = llist_del_all(&dio->bio_list);
 		if (ret)
 			break;
-		__set_current_state(TASK_UNINTERRUPTIBLE);
 		dio->waiter = current;
 		io_schedule();
 		/* wake up sets us TASK_RUNNING */
 		dio->waiter = NULL;
 	}
 
+	if (!ret)
+		ret = llist_del_all(&dio->bio_list);
+
+	__set_current_state(TASK_RUNNING);
 	return ret;
 }
 
