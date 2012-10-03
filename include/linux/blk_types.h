@@ -6,6 +6,7 @@
 #define __LINUX_BLK_TYPES_H
 
 #ifdef CONFIG_BLOCK
+#ifdef __KERNEL__
 
 #include <linux/types.h>
 #include <linux/llist.h>
@@ -121,6 +122,7 @@ struct bio {
 #define BIO_POOL_MASK		(1UL << BIO_POOL_OFFSET)
 #define BIO_POOL_IDX(bio)	((bio)->bi_flags >> BIO_POOL_OFFSET)
 
+#endif /* __KERNEL__ */
 #endif /* CONFIG_BLOCK */
 
 /*
