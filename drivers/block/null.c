@@ -41,6 +41,10 @@ enum {
 	NULL_Q_BIO		= 0,
 	NULL_Q_RQ		= 1,
 	NULL_Q_MQ		= 2,
+
+	NULL_A_SINGLE		= 0,
+	NULL_A_PERNODE		= 1,
+	NULL_A_PERCPU		= 2,
 };
 
 static int submit_queues = 1;
@@ -83,9 +87,9 @@ static int hw_queue_depth = 64;
 module_param(hw_queue_depth, int, S_IRUGO);
 MODULE_PARM_DESC(hw_queue_depth, "Queue depth for each hardware queue. Default: 64");
 
-static bool use_per_node_hctx = true;
-module_param(use_per_node_hctx, bool, S_IRUGO);
-MODULE_PARM_DESC(use_per_node_hctx, "Use per-node allocation for hardware context queues. Default: true");
+static int hctx_mode = 0;
+module_param(hctx_mode, int, S_IRUGO);
+MODULE_PARM_DESC(hctx_mode, "Allocation scheme for hardware context queues. 0-single, 1-per-node, 2-per-cpu. Default: single");
 
 static void null_complete_request(struct request *rq)
 {
@@ -245,7 +249,7 @@ static int null_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 static struct blk_mq_hw_ctx *null_alloc_hctx(struct blk_mq_reg *reg, unsigned int hctx_index)
 {
 	return kmalloc_node(sizeof(struct blk_mq_hw_ctx),
-				GFP_KERNEL | __GFP_ZERO, hctx_index);
+				GFP_KERNEL | __GFP_ZERO, hctx_index % nr_online_nodes);
 }
 
 static void null_free_hctx(struct blk_mq_hw_ctx* hctx, unsigned int hctx_index)
@@ -261,6 +265,13 @@ struct blk_mq_hw_ctx *null_queue_map_per_node(struct request_queue *q,
 {
 	return q->queue_hw_ctx[cpu_to_node(ctx_index)];
 }
+
+static struct blk_mq_hw_ctx *null_queue_map_per_cpu(struct request_queue *q,
+					      const int ctx_index)
+{
+	return q->queue_hw_ctx[ctx_index];
+}
+
 
 static struct blk_mq_ops null_mq_ops = {
 	.queue_rq       = null_queue_rq,
@@ -320,16 +331,23 @@ static int null_add_dev(void)
 		null_mq_reg.numa_node = home_node;
 		null_mq_reg.queue_depth = hw_queue_depth;
 
-		if (use_per_node_hctx) {
-			null_mq_reg.ops->alloc_hctx = null_alloc_hctx;
-			null_mq_reg.ops->free_hctx = null_free_hctx;
 
-			null_mq_reg.nr_hw_queues = nr_online_nodes;
-		} else {
+		if (hctx_mode == NULL_A_SINGLE) {
 			null_mq_reg.ops->alloc_hctx = blk_mq_alloc_single_hw_queue;
 			null_mq_reg.ops->free_hctx = blk_mq_free_single_hw_queue;
 
 			null_mq_reg.nr_hw_queues = submit_queues;
+		} else {
+			null_mq_reg.ops->alloc_hctx = null_alloc_hctx;
+			null_mq_reg.ops->free_hctx = null_free_hctx;
+
+			if (hctx_mode == NULL_A_PERNODE) {
+				null_mq_reg.nr_hw_queues = nr_online_nodes;
+				null_mq_reg.ops->map_queue = null_queue_map_per_node;
+			} else if (hctx_mode == NULL_A_PERCPU) {
+				null_mq_reg.nr_hw_queues = nr_cpu_ids;
+				null_mq_reg.ops->map_queue = null_queue_map_per_cpu;
+			}
 		}
 
 		nullb->q = blk_mq_init_queue(&null_mq_reg);
