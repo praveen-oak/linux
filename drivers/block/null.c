@@ -73,7 +73,7 @@ MODULE_PARM_DESC(nr_devices, "Number of devices to register");
 
 static int irqmode = NULL_IRQ_SOFTIRQ;
 module_param(irqmode, int, S_IRUGO);
-MODULE_PARM_DESC(irqmode, "IRQ completion handler. 0-none, 1-softirq, 2-timer");
+MODULE_PARM_DESC(irqmode, "IRQ completion handler. 0-none, 1-softirq, 2-timer. Default: softirq");
 
 static int completion_nsec = 10000;
 module_param(completion_nsec, int, S_IRUGO);
