@@ -47,10 +47,6 @@ enum {
 	NULL_A_PERCPU		= 2,
 };
 
-static int submit_queues = 1;
-module_param(submit_queues, int, S_IRUGO);
-MODULE_PARM_DESC(submit_queues, "Number of submission queues");
-
 static int complete_queues = 1;
 module_param(complete_queues, int, S_IRUGO);
 MODULE_PARM_DESC(complete_queues, "Number of completion queues");
@@ -282,6 +278,7 @@ static struct blk_mq_reg null_mq_reg = {
 	.ops		= &null_mq_ops,
 	.queue_depth	= 64,
 	.flags		= BLK_MQ_F_SHOULD_MERGE,
+	.nr_hw_queues = 1,
 };
 
 static void null_del_dev(struct nullb *nullb)
@@ -331,12 +328,10 @@ static int null_add_dev(void)
 		null_mq_reg.numa_node = home_node;
 		null_mq_reg.queue_depth = hw_queue_depth;
 
-
 		if (hctx_mode == NULL_A_SINGLE) {
 			null_mq_reg.ops->alloc_hctx = blk_mq_alloc_single_hw_queue;
 			null_mq_reg.ops->free_hctx = blk_mq_free_single_hw_queue;
 
-			null_mq_reg.nr_hw_queues = submit_queues;
 		} else {
 			null_mq_reg.ops->alloc_hctx = null_alloc_hctx;
 			null_mq_reg.ops->free_hctx = null_free_hctx;
