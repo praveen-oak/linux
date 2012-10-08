@@ -31,6 +31,8 @@ struct blk_mq_hw_ctx {
 	unsigned int		numa_node;
 
 	struct kobject		kobj;
+
+	unsigned int		nr;
 };
 
 struct blk_mq_reg {

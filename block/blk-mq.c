@@ -755,6 +755,7 @@ struct request_queue *blk_mq_init_queue(struct blk_mq_reg *reg)
 		hctx->nr_ctx_map = num_maps;
 
 		hctx->nr_ctx = 0;
+		hctx->nr = i;
 	}
 
 	/*
