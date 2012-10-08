@@ -78,6 +78,13 @@
 #define DEF_PORT_IRQ \
 	(PORT_IRQ_ERR | PORT_IRQ_LEGACY | PORT_IRQ_SDB_FIS)
 
+/* use round-robin allocation for issuing commands, or map
+ * each slot group to a multiqueue hardware context.
+ */
+static bool map_hctx_to_group = false;
+module_param(map_hctx_to_group, bool, S_IRUGO);
+MODULE_PARM_DESC(map_hctx_to_group, "Map available slot groups to a hardware context queue. Default: false");
+
 /* product numbers */
 #define MTIP_PRODUCT_UNKNOWN	0x00
 #define MTIP_PRODUCT_ASICFPGA	0x11
