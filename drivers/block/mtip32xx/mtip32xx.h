@@ -49,15 +49,18 @@
 #define MTIP_FTL_REBUILD_MAGIC		0xED51
 #define MTIP_FTL_REBUILD_TIMEOUT_MS	2400000
 
+#define MTIP_GROUP_TAG_SHIFT		(5)
+#define MTIP_TAG_GROUP_MASK		((1 << MTIP_GROUP_TAG_SHIFT) - 1)
+
 /* Macro to extract the tag bit number from a tag value. */
-#define MTIP_TAG_BIT(tag)	(tag & 0x1F)
+#define MTIP_TAG_TO_GROUP_TAG(tag)	(tag & MTIP_TAG_GROUP_MASK)
 
 /*
  * Macro to extract the tag index from a tag value. The index
  * is used to access the correct s_active/Command Issue register based
  * on the tag value.
  */
-#define MTIP_TAG_INDEX(tag)	(tag >> 5)
+#define MTIP_TAG_TO_GROUP(tag)	(tag >> MTIP_GROUP_TAG_SHIFT)
 
 /*
  * Maximum number of scatter gather entries
@@ -73,6 +76,8 @@
 
 /* Internal command tag. */
 #define MTIP_TAG_INTERNAL	0
+#define MTIP_GROUP_TAG_INTERNAL	0
+#define MTIP_GROUP_INTERNAL	0
 
 /* Micron Vendor ID & P320x SSD Device ID */
 #define PCI_VENDOR_ID_MICRON    0x1344
@@ -312,6 +317,26 @@ struct mtip_cmd {
 	atomic_t active; /* declares if this command sent to the drive. */
 };
 
+struct mtip_group {
+	/* Spinlock for working around command-issue bug. */
+	spinlock_t cmd_issue_lock;
+
+	unsigned int group_num;
+
+	/*
+	 * Array of command slots. Structure includes pointers to the
+	 * command header and command table, and completion function and data
+	 * pointers.
+	 */
+	struct mtip_cmd commands[32];
+
+	unsigned long allocated;
+
+	void __iomem *s_active;
+	void __iomem *cmd_issue;
+	void __iomem *completed;
+};
+
 /* Structure used to describe a port. */
 struct mtip_port {
 	/* Pointer back to the driver data for this port. */
@@ -323,12 +348,9 @@ struct mtip_port {
 	unsigned long identify_valid;
 	/* Base address of the memory mapped IO for the port. */
 	void __iomem *mmio;
-	/* Array of pointers to the memory mapped s_active registers. */
-	void __iomem *s_active[MTIP_MAX_SLOT_GROUPS];
-	/* Array of pointers to the memory mapped completed registers. */
-	void __iomem *completed[MTIP_MAX_SLOT_GROUPS];
-	/* Array of pointers to the memory mapped Command Issue registers. */
-	void __iomem *cmd_issue[MTIP_MAX_SLOT_GROUPS];
+
+	struct mtip_group g[MTIP_MAX_SLOT_GROUPS];
+
 	/*
 	 * Pointer to the beginning of the command header memory as used
 	 * by the driver.
@@ -391,18 +413,11 @@ struct mtip_port {
 	u8 *smart_buf;
 	dma_addr_t smart_buf_dma;
 
-	unsigned long allocated[SLOTBITS_IN_LONGS];
 	/*
 	 * used to queue commands when an internal command is in progress
 	 * or error handling is active
 	 */
 	unsigned long cmds_to_issue[SLOTBITS_IN_LONGS];
-	/*
-	 * Array of command slots. Structure includes pointers to the
-	 * command header and command table, and completion function and data
-	 * pointers.
-	 */
-	struct mtip_cmd commands[MTIP_MAX_COMMAND_SLOTS];
 	/* Used by mtip_service_thread to wait for an event */
 	wait_queue_head_t svc_wait;
 	/*
@@ -420,8 +435,6 @@ struct mtip_port {
 	 * command slots available.
 	 */
 	struct semaphore cmd_slot;
-	/* Spinlock for working around command-issue bug. */
-	spinlock_t cmd_issue_lock;
 };
 
 /*
