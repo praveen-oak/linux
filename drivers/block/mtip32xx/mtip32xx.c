@@ -203,28 +203,32 @@ static void mtip_command_cleanup(struct driver_data *dd)
  *	>= 0	Index of command slot obtained.
  *	-1	No command slots available.
  */
-static int get_slot(struct mtip_port *port)
+static int get_slot(struct mtip_port *port, struct blk_mq_hw_ctx *hctx)
 {
 	int slot, offset, group;
+	struct mtip_group *g;
 
-	/*
-	 * Try 10 times, because there is a small race here.
-	 *  that's ok, because it's still cheaper than a lock.
-	 *
-	 * Race: Since this section is not protected by lock, same bit
-	 * could be chosen by different process contexts running in
-	 * different processor. So instead of costly lock, we are going
-	 * with loop.
-	 */
-	offset = 1;
-	for (group = 0; group < port->dd->slot_groups; group++) {
-		struct mtip_group *g = &port->g[group];
+	if (map_hctx_to_group) {
+		group = hctx->nr;
+		g = &port->g[group];
+
+		/* The first entry in the queue is reserved */
+		offset = (group == 0);
 
 		slot = find_next_zero_bit(&g->allocated, 32, offset);
-		if ((slot < 32) && !test_and_set_bit(slot, &g->allocated))
+		if (!test_and_set_bit(slot, &g->allocated))
 			return slot | (group << MTIP_GROUP_TAG_SHIFT);
+	} else {
+		offset = 1;
+		for (group = 0; group < port->dd->slot_groups; group++) {
+			struct mtip_group *g = &port->g[group];
 
-		offset = 0;
+			slot = find_next_zero_bit(&g->allocated, 32, offset);
+			if ((slot < 32) && !test_and_set_bit(slot, &g->allocated))
+				return slot | (group << MTIP_GROUP_TAG_SHIFT);
+
+			offset = 0;
+		}
 	}
 
 	dev_warn(&port->dd->pdev->dev, "Failed to get a tag.\n");
@@ -2576,7 +2580,7 @@ static void mtip_hw_release_scatterlist(struct driver_data *dd, int tag)
  *	or NULL if no command slots are available.
  */
 static struct scatterlist *mtip_hw_get_scatterlist(struct driver_data *dd,
-						   int *tag)
+							struct blk_mq_hw_ctx *hctx, int *tag)
 {
 	struct mtip_port *port = dd->port;
 
@@ -2586,7 +2590,7 @@ static struct scatterlist *mtip_hw_get_scatterlist(struct driver_data *dd,
 	 * need to make an attempt to get_slot().
 	 */
 	down(&port->cmd_slot);
-	*tag = get_slot(port);
+	*tag = get_slot(port, hctx);
 
 	if (unlikely(test_bit(MTIP_DDF_REMOVE_PENDING_BIT, &dd->dd_flag))) {
 		up(&port->cmd_slot);
@@ -3661,7 +3665,7 @@ static int mtip_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 			return -ENODATA;
 	}
 
-	sg = mtip_hw_get_scatterlist(dd, &rq->tag);
+	sg = mtip_hw_get_scatterlist(dd, hctx, &rq->tag);
 	if (!sg)
 		return -EIO;
 
@@ -3690,6 +3694,36 @@ static int mtip_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 
 	rq->errors = ret;
 	return BLK_MQ_RQ_QUEUE_ERROR;
+}
+
+static void mtip_mq_setup_mapping(unsigned int *hctx_map)
+{
+	int i;
+
+	for_each_online_cpu(i) {
+		hctx_map[i] = cpu_to_node(i);
+	}
+}
+
+static struct blk_mq_hw_ctx *mtip_mq_map_hctx_queue(struct request_queue *q,
+					      const int ctx_index)
+{
+	struct driver_data *dd = q->queuedata;
+
+	int hw_ctx = dd->hctx_map[ctx_index];
+
+	return q->queue_hw_ctx[hw_ctx];
+}
+
+static struct blk_mq_hw_ctx *mtip_alloc_hctx(struct blk_mq_reg *reg, unsigned int hctx_index)
+{
+	return kmalloc_node(sizeof(struct blk_mq_hw_ctx),
+			GFP_KERNEL | __GFP_ZERO, hctx_index % nr_online_nodes);
+}
+
+static void mtip_free_hctx(struct blk_mq_hw_ctx* hctx, unsigned int hctx_index)
+{
+	kfree(hctx);
 }
 
 static struct blk_mq_ops mtip_mq_ops = {
@@ -3781,6 +3815,18 @@ static int mtip_block_initialize(struct driver_data *dd)
 		goto start_service_thread;
 
 skip_create_disk:
+
+	if (map_hctx_to_group) {
+		mtip_mq_reg.nr_hw_queues = MTIP_MAX_SLOT_GROUPS;
+
+		mtip_mq_reg.ops->alloc_hctx = mtip_alloc_hctx;
+		mtip_mq_reg.ops->free_hctx = mtip_free_hctx;
+		mtip_mq_reg.ops->map_queue = mtip_mq_map_hctx_queue;
+
+		mtip_mq_setup_mapping(dd->hctx_map);
+	}
+
+
 	/* Allocate the request queue. */
 	dd->queue = blk_mq_init_queue(&mtip_mq_reg);
 	if (dd->queue == NULL) {
@@ -3999,6 +4045,13 @@ static int mtip_pci_probe(struct pci_dev *pdev,
 		return -ENOMEM;
 	}
 
+	dd->hctx_map = kzalloc(sizeof(char) * nr_cpu_ids, GFP_KERNEL);
+	if (dd->hctx_map == NULL) {
+		dev_err(&pdev->dev,
+			"Unable to allocate memory for driver data\n");
+		goto dd_hctx_err;
+	}
+
 	/* Attach the private data to this PCI device.  */
 	pci_set_drvdata(pdev, dd);
 
@@ -4066,8 +4119,12 @@ setmask_err:
 	pcim_iounmap_regions(pdev, 1 << MTIP_ABAR);
 
 iomap_err:
-	kfree(dd);
 	pci_set_drvdata(pdev, NULL);
+	kfree(dd->hctx_map);
+
+dd_hctx_err:
+	kfree(dd);
+
 	return rv;
 done:
 	return rv;
@@ -4104,6 +4161,7 @@ static void mtip_pci_remove(struct pci_dev *pdev)
 
 	pci_disable_msi(pdev);
 
+	kfree(dd->hctx_map);
 	kfree(dd);
 	pcim_iounmap_regions(pdev, 1 << MTIP_ABAR);
 }

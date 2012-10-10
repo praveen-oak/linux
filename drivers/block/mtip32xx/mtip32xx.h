@@ -471,6 +471,8 @@ struct driver_data {
 	struct task_struct *mtip_svc_handler; /* task_struct of svc thd */
 
 	struct dentry *dfs_node;
+
+	unsigned *hctx_map; /* fully-associated map for hctx to core mapping */
 };
 
 #endif
