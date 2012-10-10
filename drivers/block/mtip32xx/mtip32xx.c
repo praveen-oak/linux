@@ -104,6 +104,8 @@ static DEFINE_IDA(rssd_index_ida);
 
 static int mtip_block_initialize(struct driver_data *dd);
 
+static struct blk_mq_reg mtip_mq_reg;
+
 #ifdef CONFIG_COMPAT
 struct mtip_compat_ide_task_request_s {
 	__u8		io_ports[8];
@@ -2633,6 +2635,54 @@ static ssize_t mtip_hw_show_status(struct device *dev,
 
 static DEVICE_ATTR(status, S_IRUGO, mtip_hw_show_status, NULL);
 
+/*
+ * Sysfs hctx mapping dump.
+ */
+static ssize_t mtip_hctx_map_show(struct device *dev,
+				struct device_attribute *attr,
+				char *buf)
+{
+	struct driver_data *dd = dev_to_disk(dev)->private_data;
+	int size = 0, len = 0, i;
+
+	for_each_online_cpu(i) {
+		len = sprintf(&buf[size], "%u ", dd->hctx_map[i]);
+		size += len;
+	}
+
+	size += sprintf(&buf[size], "\n");
+
+	return size;
+}
+
+static ssize_t mtip_hctx_map_store(struct device *dev,
+			 struct device_attribute *attr,
+			 const char *buf, size_t size)
+{
+	struct driver_data *dd = dev_to_disk(dev)->private_data;
+	unsigned res;
+	int i, len = 0, idx = 0;
+
+	for_each_online_cpu(i) {
+		len = sscanf(&buf[idx], "%u", &res);
+
+		if (!len)
+			return -EINVAL;
+
+		if (res > (mtip_mq_reg.nr_hw_queues - 1))
+			return -ERANGE;
+
+		dd->hctx_map[i] = res;
+		idx += len + 1;
+
+		if (idx > size)
+			return -EINVAL;
+	}
+
+	return size;
+}
+static DEVICE_ATTR(hctx_map, S_IRUGO | S_IWUSR, mtip_hctx_map_show, mtip_hctx_map_store);
+
 static ssize_t mtip_hw_read_registers(struct file *f, char __user *ubuf,
 				  size_t len, loff_t *offset)
 {
@@ -2756,6 +2806,11 @@ static int mtip_hw_sysfs_init(struct driver_data *dd, struct kobject *kobj)
 	if (sysfs_create_file(kobj, &dev_attr_status.attr))
 		dev_warn(&dd->pdev->dev,
 			"Error creating 'status' sysfs entry\n");
+
+	if (sysfs_create_file(kobj, &dev_attr_hctx_map.attr))
+		dev_warn(&dd->pdev->dev,
+			"error creating 'hctx_map' sysfs entry\n");
+
 	return 0;
 }
 
@@ -2774,6 +2829,7 @@ static int mtip_hw_sysfs_exit(struct driver_data *dd, struct kobject *kobj)
 	if (!kobj || !dd)
 		return -EINVAL;
 
+	sysfs_remove_file(kobj, &dev_attr_hctx_map.attr);
 	sysfs_remove_file(kobj, &dev_attr_status.attr);
 
 	return 0;
@@ -3726,6 +3782,9 @@ static void mtip_free_hctx(struct blk_mq_hw_ctx* hctx, unsigned int hctx_index)
 	kfree(hctx);
 }
 
+/*
+ * Default values for multiqueue initialization.
+ */
 static struct blk_mq_ops mtip_mq_ops = {
 	.queue_rq	= mtip_queue_rq,
 	.map_queue	= blk_mq_map_single_queue,
