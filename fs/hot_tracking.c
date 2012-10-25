@@ -15,9 +15,12 @@
 #include <linux/module.h>
 #include <linux/spinlock.h>
 #include <linux/hardirq.h>
+#include <linux/kthread.h>
+#include <linux/freezer.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/types.h>
+#include <linux/list_sort.h>
 #include <linux/limits.h>
 #include "hot_tracking.h"
 
@@ -548,6 +551,67 @@ static void hot_map_exit(struct hot_info *root)
 	}
 }
 
+/* Temperature compare function*/
+static int hot_temp_cmp(void *priv, struct list_head *a,
+				struct list_head *b)
+{
+	struct hot_comm_item *ap =
+			container_of(a, struct hot_comm_item, n_list);
+	struct hot_comm_item *bp =
+			container_of(b, struct hot_comm_item, n_list);
+
+	int diff = ap->hot_freq_data.last_temp
+				- bp->hot_freq_data.last_temp;
+	if (diff > 0)
+		return -1;
+	if (diff < 0)
+		return 1;
+	return 0;
+}
+
+/*
+ * Every sync period we update temperatures for
+ * each hot inode item and hot range item for aging
+ * purposes.
+ */
+static void hot_update_worker(struct work_struct *work)
+{
+	struct hot_info *root = container_of(to_delayed_work(work),
+					struct hot_info, update_work);
+	struct rb_node *node;
+	struct hot_comm_item *ci;
+	struct hot_inode_item *he;
+	int i;
+
+	node = rb_first(&root->hot_inode_tree.map);
+	while (node) {
+		ci = rb_entry(node, struct hot_comm_item, rb_node);
+		he = container_of(ci, struct hot_inode_item, hot_inode);
+		kref_get(&he->hot_inode.refs);
+		hot_map_update(
+			&he->hot_inode.hot_freq_data, root);
+		hot_range_update(he, root);
+		node = rb_next(node);
+		hot_inode_item_put(he);
+	}
+
+	/* Sort temperature map info */
+	for (i = 0; i < HEAT_MAP_SIZE; i++) {
+		spin_lock(&root->heat_inode_map[i].lock);
+		list_sort(NULL, &root->heat_inode_map[i].node_list,
+			hot_temp_cmp);
+		spin_unlock(&root->heat_inode_map[i].lock);
+		spin_lock(&root->heat_range_map[i].lock);
+		list_sort(NULL, &root->heat_range_map[i].node_list,
+			hot_temp_cmp);
+		spin_unlock(&root->heat_range_map[i].lock);
+	}
+
+	/* Instert next delayed work */
+	queue_delayed_work(root->update_wq, &root->update_work,
+		msecs_to_jiffies(HEAT_UPDATE_DELAY * MSEC_PER_SEC));
+}
+
 /*
  * Initialize kmem cache for hot_inode_item and hot_range_item.
  */
@@ -641,11 +705,30 @@ int hot_track_init(struct super_block *sb)
 	hot_inode_tree_init(root);
 	hot_map_init(root);
 
+	root->update_wq = alloc_workqueue(
+		"hot_update_wq", WQ_NON_REENTRANT, 0);
+	if (!root->update_wq) {
+		printk(KERN_ERR "%s: Failed to create "
+				"hot update workqueue\n", __func__);
+		goto failed_wq;
+	}
+
+	/* Initialize hot tracking wq and arm one delayed work */
+	INIT_DELAYED_WORK(&root->update_work, hot_update_worker);
+	queue_delayed_work(root->update_wq, &root->update_work,
+		msecs_to_jiffies(HEAT_UPDATE_DELAY * MSEC_PER_SEC));
+
 	sb->s_hot_root = root;
 
 	printk(KERN_INFO "VFS: Turning on hot data tracking\n");
 
 	return 0;
+
+failed_wq:
+	hot_map_exit(root);
+	hot_inode_tree_exit(root);
+	kfree(root);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(hot_track_init);
 
@@ -653,6 +736,8 @@ void hot_track_exit(struct super_block *sb)
 {
 	struct hot_info *root = sb->s_hot_root;
 
+	cancel_delayed_work_sync(&root->update_work);
+	destroy_workqueue(root->update_wq);
 	hot_map_exit(root);
 	hot_inode_tree_exit(root);
 	sb->s_hot_root = NULL;
