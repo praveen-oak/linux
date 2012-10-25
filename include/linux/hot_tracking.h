@@ -20,6 +20,9 @@
 #include <linux/kref.h>
 #include <linux/fs.h>
 
+#define HEAT_MAP_BITS 8
+#define HEAT_MAP_SIZE (1 << HEAT_MAP_BITS)
+
 struct hot_rb_tree {
 	struct rb_root map;
 };
@@ -40,12 +43,20 @@ struct hot_freq_data {
 	u32 last_temp;
 };
 
+/* List heads in hot map array */
+struct hot_map_head {
+	struct list_head node_list;
+	u8 temp;
+	spinlock_t lock;
+};
+
 /* The common info for both following structures */
 struct hot_comm_item {
 	struct rb_node rb_node; /* rbtree index */
 	struct hot_freq_data hot_freq_data;  /* frequency data */
 	spinlock_t lock; /* protects object data */
 	struct kref refs;  /* prevents kfree */
+	struct list_head n_list; /* list node index */
 };
 
 /* An item representing an inode and its access frequency */
@@ -71,6 +82,12 @@ struct hot_range_item {
 struct hot_info {
 	struct hot_rb_tree hot_inode_tree;
 	spinlock_t lock; /*protect inode tree */
+
+	/* map of inode temperature */
+	struct hot_map_head heat_inode_map[HEAT_MAP_SIZE];
+	/* map of range temperature */
+	struct hot_map_head heat_range_map[HEAT_MAP_SIZE];
+	unsigned int hot_map_nr;
 };
 
 extern void __init hot_cache_init(void);
