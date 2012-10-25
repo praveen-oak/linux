@@ -43,6 +43,17 @@ struct hot_freq_data {
 	u32 last_temp;
 };
 
+struct hot_heat_info {
+	__u64 avg_delta_reads;
+	__u64 avg_delta_writes;
+	__u64 last_read_time;
+	__u64 last_write_time;
+	__u32 num_reads;
+	__u32 num_writes;
+	__u32 temp;
+	__u8 live;
+};
+
 /* List heads in hot map array */
 struct hot_map_head {
 	struct list_head node_list;
@@ -112,6 +123,14 @@ struct hot_info {
 	struct hot_type *hot_type;
 	struct shrinker hot_shrink;
 };
+
+/*
+ * Hot data tracking ioctls:
+ *
+ * HOT_INFO - retrieve info on frequency of access
+ */
+#define FS_IOC_GET_HEAT_INFO _IOR('f', 17, \
+			struct hot_heat_info)
 
 extern void __init hot_cache_init(void);
 extern int hot_track_init(struct super_block *sb);
