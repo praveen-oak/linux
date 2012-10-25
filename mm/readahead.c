@@ -19,6 +19,7 @@
 #include <linux/pagemap.h>
 #include <linux/syscalls.h>
 #include <linux/file.h>
+#include <linux/hot_tracking.h>
 
 /*
  * Initialise a struct file's readahead state.  Assumes that the caller has
@@ -137,6 +138,12 @@ static int read_pages(struct address_space *mapping, struct file *filp,
 
 out:
 	blk_finish_plug(&plug);
+
+	/* Hot data tracking */
+	hot_update_freqs(mapping->host,
+		(loff_t)(list_entry(pages->prev, struct page, lru)->index)
+			<< PAGE_CACHE_SHIFT,
+		(size_t)nr_pages * PAGE_CACHE_SIZE, 0);
 
 	return ret;
 }
