@@ -77,5 +77,9 @@ extern void __init hot_cache_init(void);
 extern int hot_track_init(struct super_block *sb);
 extern void hot_track_exit(struct super_block *sb);
 extern void hot_inode_item_put(struct hot_inode_item *he);
+extern void hot_update_freqs(struct inode *inode, loff_t start,
+				size_t len, int rw);
+extern struct hot_inode_item *hot_inode_item_lookup(struct hot_info *root,
+						u64 ino);
 
 #endif  /* _LINUX_HOTTRACK_H */

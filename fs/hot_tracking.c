@@ -164,6 +164,135 @@ static void hot_inode_tree_exit(struct hot_info *root)
 	spin_unlock(&root->lock);
 }
 
+struct hot_inode_item
+*hot_inode_item_lookup(struct hot_info *root, u64 ino)
+{
+	struct rb_node **p = &root->hot_inode_tree.map.rb_node;
+	struct rb_node *parent = NULL;
+	struct hot_comm_item *ci;
+	struct hot_inode_item *entry;
+
+	/* walk tree to find insertion point */
+	spin_lock(&root->lock);
+	while (*p) {
+		parent = *p;
+		ci = rb_entry(parent, struct hot_comm_item, rb_node);
+		entry = container_of(ci, struct hot_inode_item, hot_inode);
+		if (ino < entry->i_ino)
+			p = &(*p)->rb_left;
+		else if (ino > entry->i_ino)
+			p = &(*p)->rb_right;
+		else {
+			spin_unlock(&root->lock);
+			kref_get(&entry->hot_inode.refs);
+			return entry;
+		}
+	}
+	spin_unlock(&root->lock);
+
+	entry = kmem_cache_zalloc(hot_inode_item_cachep, GFP_NOFS);
+	if (!entry)
+		return ERR_PTR(-ENOMEM);
+
+	spin_lock(&root->lock);
+	hot_inode_item_init(entry, ino, &root->hot_inode_tree);
+	rb_link_node(&entry->hot_inode.rb_node, parent, p);
+	rb_insert_color(&entry->hot_inode.rb_node,
+			&root->hot_inode_tree.map);
+	spin_unlock(&root->lock);
+
+	kref_get(&entry->hot_inode.refs);
+	return entry;
+}
+EXPORT_SYMBOL_GPL(hot_inode_item_lookup);
+
+static loff_t hot_range_end(struct hot_range_item *hr)
+{
+	if (hr->start + hr->len < hr->start)
+		return (loff_t)-1;
+
+	return hr->start + hr->len - 1;
+}
+
+static struct hot_range_item
+*hot_range_item_lookup(struct hot_inode_item *he,
+			loff_t start)
+{
+	struct rb_node **p = &he->hot_range_tree.map.rb_node;
+	struct rb_node *parent = NULL;
+	struct hot_comm_item *ci;
+	struct hot_range_item *entry;
+
+	/* walk tree to find insertion point */
+	spin_lock(&he->lock);
+	while (*p) {
+		parent = *p;
+		ci = rb_entry(parent, struct hot_comm_item, rb_node);
+		entry = container_of(ci, struct hot_range_item, hot_range);
+		if (start < entry->start)
+			p = &(*p)->rb_left;
+		else if (start > hot_range_end(entry))
+			p = &(*p)->rb_right;
+		else {
+			spin_unlock(&he->lock);
+			kref_get(&entry->hot_range.refs);
+			return entry;
+		}
+	}
+	spin_unlock(&he->lock);
+
+	entry = kmem_cache_zalloc(hot_range_item_cachep, GFP_NOFS);
+	if (!entry)
+		return ERR_PTR(-ENOMEM);
+
+	spin_lock(&he->lock);
+	hot_range_item_init(entry, start, he);
+	rb_link_node(&entry->hot_range.rb_node, parent, p);
+	rb_insert_color(&entry->hot_range.rb_node,
+			&he->hot_range_tree.map);
+	spin_unlock(&he->lock);
+
+	kref_get(&entry->hot_range.refs);
+	return entry;
+}
+
+/*
+ * This function does the actual work of updating
+ * the frequency numbers, whatever they turn out to be.
+ */
+static void hot_rw_freq_calc(struct timespec old_atime,
+		struct timespec cur_time, u64 *avg)
+{
+	struct timespec delta_ts;
+	u64 new_delta;
+
+	delta_ts = timespec_sub(cur_time, old_atime);
+	new_delta = timespec_to_ns(&delta_ts) >> FREQ_POWER;
+
+	*avg = (*avg << FREQ_POWER) - *avg + new_delta;
+	*avg = *avg >> FREQ_POWER;
+}
+
+static void hot_freq_data_update(struct hot_freq_data *freq_data, bool write)
+{
+	struct timespec cur_time = current_kernel_time();
+
+	if (write) {
+		freq_data->nr_writes += 1;
+		hot_rw_freq_calc(freq_data->last_write_time,
+				cur_time,
+				&freq_data->avg_delta_writes);
+		freq_data->last_write_time = cur_time;
+	} else {
+		freq_data->nr_reads += 1;
+		hot_rw_freq_calc(freq_data->last_read_time,
+				freq_data->last_read_time,
+				cur_time,
+				&freq_data->avg_delta_reads);
+		freq_data->last_read_time = cur_time;
+	}
+}
+
 /*
  * Initialize kmem cache for hot_inode_item and hot_range_item.
  */
@@ -189,6 +318,55 @@ err:
 	kmem_cache_destroy(hot_inode_item_cachep);
 }
 EXPORT_SYMBOL_GPL(hot_cache_init);
+
+/*
+ * Main function to update access frequency from read/writepage(s) hooks
+ */
+void hot_update_freqs(struct inode *inode, loff_t start,
+			size_t len, int rw)
+{
+	struct hot_info *root = inode->i_sb->s_hot_root;
+	struct hot_inode_item *he;
+	struct hot_range_item *hr;
+	loff_t cur, end;
+
+	if (!root || (len == 0))
+		return;
+
+	he = hot_inode_item_lookup(root, inode->i_ino);
+	if (IS_ERR(he)) {
+		WARN_ON(1);
+		return;
+	}
+
+	spin_lock(&he->hot_inode.lock);
+	hot_freq_data_update(&he->hot_inode.hot_freq_data, rw);
+	spin_unlock(&he->hot_inode.lock);
+
+	/*
+	 * Align ranges on RANGE_SIZE boundary
+	 * to prevent proliferation of range structs
+	 */
+	end = (start + len + RANGE_SIZE - 1) >> RANGE_BITS;
+	for (cur = (start >> RANGE_BITS); cur < end; cur++) {
+		hr = hot_range_item_lookup(he, cur);
+		if (IS_ERR(hr)) {
+			WARN(1, "hot_range_item_lookup returns %ld\n",
+				PTR_ERR(hr));
+			hot_inode_item_put(he);
+			return;
+		}
+
+		spin_lock(&hr->hot_range.lock);
+		hot_freq_data_update(&hr->hot_range.hot_freq_data, rw);
+		spin_unlock(&hr->hot_range.lock);
+
+		hot_range_item_put(hr);
+	}
+
+	hot_inode_item_put(he);
+}
+EXPORT_SYMBOL_GPL(hot_update_freqs);
 
 /*
  * Initialize the data structures for hot data tracking.

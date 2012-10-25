@@ -19,4 +19,9 @@
 #define FREQ_DATA_TYPE_INODE (1 << 0)
 #define FREQ_DATA_TYPE_RANGE (1 << 1)
 
+/* size of sub-file ranges */
+#define RANGE_BITS 20
+#define RANGE_SIZE (1 << RANGE_BITS)
+#define FREQ_POWER 4
+
 #endif /* __HOT_TRACKING__ */
