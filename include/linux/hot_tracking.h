@@ -122,6 +122,7 @@ struct hot_info {
 	struct delayed_work update_work;
 	struct hot_type *hot_type;
 	struct shrinker hot_shrink;
+	struct dentry *vol_dentry;
 };
 
 /*
