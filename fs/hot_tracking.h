@@ -21,7 +21,6 @@
 
 /* size of sub-file ranges */
 #define RANGE_BITS 20
-#define RANGE_SIZE (1 << RANGE_BITS)
 #define FREQ_POWER 4
 
 /*

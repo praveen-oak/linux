@@ -79,6 +79,24 @@ struct hot_range_item {
 	size_t len; /* length in bytes */
 };
 
+typedef void (hot_rw_freq_calc_fn) (struct timespec old_atime,
+			struct timespec cur_time, u64 *avg);
+typedef u32 (hot_temp_calc_fn) (struct hot_freq_data *freq_data);
+typedef bool (hot_is_obsolete_fn) (struct hot_freq_data *freq_data);
+
+struct hot_func_ops {
+	hot_rw_freq_calc_fn *hot_rw_freq_calc_fn;
+	hot_temp_calc_fn *hot_temp_calc_fn;
+	hot_is_obsolete_fn *hot_is_obsolete_fn;
+};
+
+/* identifies an hot type */
+struct hot_type {
+	u64 range_bits;
+	/* fields provided by specific FS */
+	struct hot_func_ops ops;
+};
+
 struct hot_info {
 	struct hot_rb_tree hot_inode_tree;
 	spinlock_t lock; /*protect inode tree */
@@ -91,6 +109,7 @@ struct hot_info {
 
 	struct workqueue_struct *update_wq;
 	struct delayed_work update_work;
+	struct hot_type *hot_type;
 };
 
 extern void __init hot_cache_init(void);
