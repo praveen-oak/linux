@@ -6,6 +6,7 @@
 #include <linux/aio_abi.h>
 #include <linux/uio.h>
 #include <linux/rcupdate.h>
+#include <linux/llist.h>
 
 #include <linux/atomic.h>
 
@@ -50,6 +51,9 @@ struct kioctx;
 #define kiocbIsKicked(iocb)	test_bit(KIF_KICKED, &(iocb)->ki_flags)
 #define kiocbIsCancelled(iocb)	test_bit(KIF_CANCELLED, &(iocb)->ki_flags)
 
+struct kiocb;
+typedef int (iocb_cancel_fn)(struct kiocb *, struct io_event *);
+
 /* is there a better place to document function pointer methods? */
 /**
  * ki_retry	-	iocb forward progress callback
@@ -87,12 +91,11 @@ struct kioctx;
 struct kiocb {
 	struct list_head	ki_run_list;
 	unsigned long		ki_flags;
-	int			ki_users;
 	unsigned		ki_key;		/* id of this request */
 
 	struct file		*ki_filp;
 	struct kioctx		*ki_ctx;	/* may be NULL for sync ops */
-	int			(*ki_cancel)(struct kiocb *, struct io_event *);
+	iocb_cancel_fn		*ki_cancel;
 	ssize_t			(*ki_retry)(struct kiocb *);
 	void			(*ki_dtor)(struct kiocb *);
 
@@ -101,8 +104,12 @@ struct kiocb {
 		struct task_struct	*tsk;
 	} ki_obj;
 
+	atomic_t		ki_users;
+
 	__u64			ki_user_data;	/* user's data for completion */
 	loff_t			ki_pos;
+	__s64			ki_res;		/* completion data */
+	__s64			ki_res2;	/* completion data */
 
 	void			*private;
 	/* State that we remember to be able to restart/retry  */
@@ -117,7 +124,13 @@ struct kiocb {
 
 	struct list_head	ki_list;	/* the aio core uses this
 						 * for cancellation */
-	struct list_head	ki_batch;	/* batch allocation */
+	/*
+	 * We don't use batching for the lockless bits, so we can share
+	 */
+	union {
+		struct list_head	ki_batch;	/* batch allocation */
+		struct llist_node	ki_llist;	/* lockless ctx list */
+	};
 
 	/*
 	 * If the aio_resfd field of the userspace iocb is not zero,
@@ -134,7 +147,7 @@ static inline bool is_sync_kiocb(struct kiocb *kiocb)
 static inline void init_sync_kiocb(struct kiocb *kiocb, struct file *filp)
 {
 	*kiocb = (struct kiocb) {
-			.ki_users = 1,
+			.ki_users = ATOMIC_INIT(1),
 			.ki_key = KIOCB_SYNC_KEY,
 			.ki_filp = filp,
 			.ki_obj.tsk = current,
@@ -192,7 +205,9 @@ struct kioctx {
 
 	spinlock_t		ctx_lock;
 
-	int			reqs_active;
+	struct llist_head	____cacheline_aligned_in_smp done_reqs;
+
+	atomic_t		reqs_active;
 	struct list_head	active_reqs;	/* used for cancellation */
 	struct list_head	run_list;	/* used for kicked reqs */
 
@@ -211,18 +226,18 @@ extern unsigned aio_max_size;
 
 #ifdef CONFIG_AIO
 extern ssize_t wait_on_sync_kiocb(struct kiocb *iocb);
-extern int aio_put_req(struct kiocb *iocb);
+extern void aio_put_req(struct kiocb *iocb);
 extern void kick_iocb(struct kiocb *iocb);
-extern int aio_complete(struct kiocb *iocb, long res, long res2);
+extern void aio_complete(struct kiocb *iocb, long res, long res2);
 struct mm_struct;
 extern void exit_aio(struct mm_struct *mm);
 extern long do_io_submit(aio_context_t ctx_id, long nr,
 			 struct iocb __user *__user *iocbpp, bool compat);
 #else
 static inline ssize_t wait_on_sync_kiocb(struct kiocb *iocb) { return 0; }
-static inline int aio_put_req(struct kiocb *iocb) { return 0; }
+static inline void aio_put_req(struct kiocb *iocb) { }
 static inline void kick_iocb(struct kiocb *iocb) { }
-static inline int aio_complete(struct kiocb *iocb, long res, long res2) { return 0; }
+static inline void aio_complete(struct kiocb *iocb, long res, long res2) { }
 struct mm_struct;
 static inline void exit_aio(struct mm_struct *mm) { }
 static inline long do_io_submit(aio_context_t ctx_id, long nr,
@@ -230,9 +245,19 @@ static inline long do_io_submit(aio_context_t ctx_id, long nr,
 				bool compat) { return 0; }
 #endif /* CONFIG_AIO */
 
-static inline struct kiocb *list_kiocb(struct list_head *h)
+static inline void iocb_set_cancel(struct kiocb *req, iocb_cancel_fn *cancel)
 {
-	return list_entry(h, struct kiocb, ki_list);
+	struct kioctx *ctx = req->ki_ctx;
+
+	/*
+	 * Sync, no need for cancel)
+	 */
+	if (ctx) {
+		req->ki_cancel = cancel;
+		spin_lock_irq(&ctx->ctx_lock);
+		list_add_tail(&req->ki_run_list, &ctx->run_list);
+		spin_unlock_irq(&ctx->ctx_lock);
+	}
 }
 
 /* for sysctl: */
