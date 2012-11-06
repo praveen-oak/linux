@@ -1,0 +1,18 @@
+if BLOCK
+
+menu "Multi-queue IO Schedulers"
+
+config IOSCHED_MQFQ
+	tristate "Multi-queue Fairness I/O Scheduler"
+	default y
+	---help---
+	  The multi-queue I/O scheduler is targeted for SSDs. It
+	  provides fairness between processes at high IO throughput 
+	  and low cost of CPU cycles.
+
+	  This is the default I/O scheduler for multi-queue enabled block
+	  devices. 
+
+endmenu
+
+endif
