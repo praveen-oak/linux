@@ -323,6 +323,7 @@ struct request_queue {
 	/* sw queues */
 	struct blk_mq_ctx	*queue_ctx;
 	unsigned int		nr_queues;
+	bool 			use_single_queue_ctx;
 
 	/* hw dispatch queues */
 	struct blk_mq_hw_ctx	**queue_hw_ctx;

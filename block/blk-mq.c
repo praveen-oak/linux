@@ -27,7 +27,10 @@ static DEFINE_PER_CPU(struct llist_head, ipi_lists);
  */
 static struct blk_mq_ctx *blk_mq_get_ctx(struct request_queue *q)
 {
-	return per_cpu_ptr(q->queue_ctx, raw_smp_processor_id());
+	if (q->use_single_queue_ctx)
+		return per_cpu_ptr(q->queue_ctx, 0);
+	else
+		return per_cpu_ptr(q->queue_ctx, raw_smp_processor_id());
 }
 
 /*
@@ -710,6 +713,7 @@ struct request_queue *blk_mq_init_queue(struct blk_mq_reg *reg)
 	q->queue_hw_ctx = hctxs;
 
 	q->mq_ops = reg->ops;
+	q->use_single_queue_ctx = reg->flags & BLK_MQ_F_SINGLE_QUEUE;
 
 	blk_queue_make_request(q, blk_mq_make_request);
 	blk_queue_rq_timed_out(q, reg->ops->timeout);

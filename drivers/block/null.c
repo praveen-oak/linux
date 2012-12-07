@@ -87,6 +87,10 @@ static bool use_per_node_hctx = true;
 module_param(use_per_node_hctx, bool, S_IRUGO);
 MODULE_PARM_DESC(use_per_node_hctx, "Use per-node allocation for hardware context queues. Default: true");
 
+static bool use_single_swq = false;
+module_param(use_single_swq, bool, S_IRUGO);
+MODULE_PARM_DESC(use_single_swq, "Use single software queue for simulating single-queue block layer design.");
+
 static void null_complete_request(struct request *rq)
 {
 	if (queue_mode == NULL_Q_MQ)
@@ -331,6 +335,9 @@ static int null_add_dev(void)
 
 			null_mq_reg.nr_hw_queues = submit_queues;
 		}
+
+		if (use_single_swq)
+			null_mq_reg.flags |= BLK_MQ_F_SINGLE_QUEUE;
 
 		nullb->q = blk_mq_init_queue(&null_mq_reg);
 	} else if (queue_mode == NULL_Q_BIO) {
