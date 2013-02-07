@@ -1,0 +1,101 @@
+Hybrid storage cache
+
+1. Introduction
+
+The emerge of fast Solid State Storage change where data should be located for
+fast access. Traditional hard-drives are here to stay many years for bulk
+storage. SSDs are more expensive per GB, but offer significantly higher IOs with
+lower latency. In many cases, the working set of a filesystem is smaller than
+the full capacity of a drive. We can exploit this for use the SSDs for random
+accesses, while keeping sequential accesses on traditional storage.
+
+The idea is specified at the btrfs wiki. We kindly ask for comments
+regarding implementing this hybrid storage cache.
+
+2. Design
+The cache can be seen from two perspectives. A read and a write cache. 
+
+2.0 Overview
+
+Any device attached to the storage pool should allow to be used as a cache. We
+propose that the cache is stored in chunks (as cache chunks). Each allocated
+cache chunk is then available to one or more subvolumes.
+
+2.1 Caching hierarchy
+
+The caching system is built as memory -> SSD/Disk (example) -> Disk
+
+* Memory caches lookup paths, transactions, free space infomation, etc.
+* SSD/disk caches frequently used data 
+* Stores the bulk amount of data
+
+2.2 Cache opportunities:
+
+- Hotness tracking for random reads
+
+  Define threshold for when to cache reads. Back of envelope calculation 
+  tells us to cache when IO size is below 1.5MB. This assumes 100 IO/s and 
+  a read speed of 150MB/s from the traditional drives. This should be 
+  customizable.
+
+  If data is updated, we should follow the new data and evict the "old" data and
+  pre-cache the new data. 
+
+  Implementation details:
+    - Use the hot track patches for VFS to track when an inode is hot and then 
+      cache the reads.
+
+- Write-back cache for tree updates
+
+  Updates to trees is batched and flushed every 30 seconds. Flush the updates to
+  cache layer first, and then flush them later to bulk storage. 
+
+  When updates are flushed to bulk storage, we reorder IOs to be as sequential 
+  as possible. This optimization allows us to have higher throughput at
+  the cost of sorting writes at flush time.
+
+  Implementation details: 
+    -
+
+ - Write-through cache for user data
+
+   If the cache isn't "safe", i.e. no duplicate copies. The cache can be used as
+   write-through and cache any subsequent reads.
+
+   This is similar to a pure disk block-based cache approach. 
+
+
+2.3 Other
+
+ - Warm cache at mount time
+
+   Reread the SSD cache on mount to enjoy a semi-warm cache of the bulk storage.
+
+The following list of items have to be addressed for the soluton:
+
+* Cache lookup (Stored in tree, hash table, in ssd hash table ;))
+* Cache type (write through, write back, hot tracking, etc.)
+* Data structure for lookup cache
+* Allow for prioritized storage (PCM>SSD>HDD)
+
+
+2.1 Implementation
+
+* Add new cache flag type for cache block group. (referenced in 
+  btrfs_block_group_item)
+*
+
+2.1 Transaction cache
+
+2.2 Data cache
+
+2.2.1 Read cache
+
+2.2.2 Write cache
+
+* Write-through 
+* Write-back
+* Read-ahead opportunities
+* 
+
+
