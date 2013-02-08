@@ -1,32 +1,41 @@
 Hybrid storage cache
 
-The idea is described in the btrfs wiki. We kindly ask for comments
-regarding implementing this hybrid storage cache.
+The hybrid storage cache is shortly discussed in the btrfs wiki. We (Jesper and I) kindly ask for
+comments regarding implemention of this hybrid storage cache. We have written a
+short proposal with introduction/motivation and a bird's eye view of a possible
+approach. There is currently no available patches, as we like as much input before
+we begin to implement a solution. We are aware that it is no small task and
+expect to spend considerable amount of time on it.
 
 1. Introduction
 
-The emerge of fast Solid State Storage (SSD) change data how is located for fast 
+The emerge of fast Solid State Drives (SSD) change how data is stored for fast 
 accesses. Their high throughput and low latency characteristics make them a good
 choice for applications that traditionally require many traditional hard-drives.
 However, SSDs is more expensive per GB and as such, traditional hard-drives are
 still efficient to store bulk amount of data. Often, the working set of a 
 filesystem is smaller than the full capacity of a drive. We can exploit this in 
-an intelligent matter. The working sets are stored as a caching layer on SSDs. 
-They SSDs then provide fast random accesses, while larger bulk operations are 
-executed on the bulk storage.
+an intelligent matter. The working set is stored as a cache using SSDs. They then 
+provide fast random accesses, while larger bulk operations are kept on
+bulk storage.
 
-Resent development in Linux SSD caches takes a block IO approach to solve
-caching. The caches are good for use-cases where data is stable and evict data
-using based on LRU, Temparature, etc. It ignores the benefits of append 
-kernel is good enough. However, the caches lack internal file system knowledge,
-that isn't easily available to block IO caches. The internal 
+Recent development in Linux SSD caches uses a block IO approach to solve
+caching. The approach assumes that data is stable on disk and evicts data based on 
+LRU, Temparature, etc. This is great for read only schenarios and in-place
+writes. However, btrfs uses a copy on write approach, that reduces the benefits of 
+block IO caching. The caches are unable to track updates (without extensive hints 
+forth and back between the cache layer) and separate data and meta data updates.
+
+The internal file-system information available within btrfs allows separation of
+these types of updates and enables fine-grained control of a to-be implemented
+cache system. 
 
 2. Design
-The design space for the cache is divided into read and writes. For both reads
-and writes we can divide the cache into caching metadata (trees) accesses or the
-user data. Writes are further divided into either being write-back or write-through.
 
-
+The design space for the cache is divided into read and writes. For both read
+and write cache, we can divide it into caching metadata (trees) accesses or
+user data. Writes are further divided into either being write-back or
+write-through. 
 
 2.1 Overview
 
@@ -34,15 +43,15 @@ Any device attached to the storage pool should allow to be used as a cache. We
 propose that the cache is stored in chunks (as cache chunks). Each allocated
 cache chunk is then available to one or more subvolumes.
 
-Why not not use a block cache ?
-
 2.2 Caching hierarchy
 
-The extra layer created the following access pattern: memory -> SSD/Disk (example) -> Disk
+The extra layer create the following access pattern: memory -> SSD/Disk (example) -> Disk
 
 * Host memory caches lookup paths, transactions, free space infomation, etc.
-* SSD/disk caches frequently used data.
-* Traditional disks stores the largest amount of data.
+* SSD/disk cache frequently used data or writes for data that cannot be in host
+  memory.
+* Traditional hard-drives store the largest amount of data and have a complete
+  copy of all data.
 
 2.2 Cache opportunities:
 
@@ -62,7 +71,7 @@ The extra layer created the following access pattern: memory -> SSD/Disk (exampl
     - Track CoW actions and pre-warm cache.
 
 - Write-back cache 
-  
+
   * Tree updates
 
     Updates to trees are batched and flushed every 30 seconds. Flush the updates to
@@ -80,8 +89,6 @@ The extra layer created the following access pattern: memory -> SSD/Disk (exampl
       -
   * Data updates
 
-    
-
  - Write-through cache for user data
 
    If the cache isn't "safe", i.e. no duplicate copies. The cache can still be 
@@ -96,6 +103,9 @@ The extra layer created the following access pattern: memory -> SSD/Disk (exampl
 
    Reread the SSD cache on mount to enjoy a semi-warm cache of the bulk storage.
 
+   This can be archived by storing information about the cache and reconstruct
+   the cache tree 
+
 The following list of items have to be addressed for the soluton:
 
 * Cache lookup (Stored in tree, hash table, in ssd hash table ;))
@@ -108,17 +118,3 @@ The following list of items have to be addressed for the soluton:
 
 * Add new cache flag type for cache block group. (referenced in 
   btrfs_block_group_item)
-*
-
-2.1 Transaction cache
-
-2.2 Data cache
-
-2.2.1 Read cache
-
-2.2.2 Write cache
-
-* Write-through 
-* Write-back
-* Read-ahead opportunities
-* 
