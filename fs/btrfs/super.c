@@ -324,6 +324,7 @@ enum {
 	Opt_no_space_cache, Opt_recovery, Opt_skip_balance,
 	Opt_check_integrity, Opt_check_integrity_including_extent_data,
 	Opt_check_integrity_print_mask, Opt_fatal_errors, Opt_hot_track,
+	Opt_device_cache,
 	Opt_err,
 };
 
@@ -365,6 +366,7 @@ static match_table_t tokens = {
 	{Opt_check_integrity_print_mask, "check_int_print_mask=%d"},
 	{Opt_fatal_errors, "fatal_errors=%s"},
 	{Opt_hot_track, "hot_track"},
+	{Opt_device_cache, "device_cache=%s"},
 	{Opt_err, NULL},
 };
 
@@ -663,6 +665,8 @@ static int btrfs_parse_early_options(const char *options, fmode_t flags,
 	char *device_name, *opts, *orig, *p;
 	int error = 0;
 	int intarg;
+	int num_devices = 0;
+	int num_device_caches = 0;
 
 	if (!options)
 		return 0;
@@ -703,7 +707,11 @@ static int btrfs_parse_early_options(const char *options, fmode_t flags,
 			printk(KERN_WARNING
 				"btrfs: 'subvolrootid' mount option is deprecated and has no effect\n");
 			break;
+		case Opt_device_cache:
+			num_device_caches++;
 		case Opt_device:
+			num_devices++;
+
 			device_name = match_strdup(&args[0]);
 			if (!device_name) {
 				error = -ENOMEM;
@@ -721,6 +729,11 @@ static int btrfs_parse_early_options(const char *options, fmode_t flags,
 	}
 
 out:
+
+	if (!num_devices && num_device_caches > 0) {
+		error = -EINVAL;
+		printk(KERN_ERR "btrfs: a device cache can only be mounted with other disks\n");
+	}
 	kfree(orig);
 	return error;
 }
