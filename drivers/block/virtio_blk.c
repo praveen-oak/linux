@@ -723,7 +723,7 @@ static struct blk_mq_reg virtio_mq_reg = {
 	.nr_hw_queues	= 1,
 	.queue_depth	= 64,
 	.numa_node	= NUMA_NO_NODE,
-	.flags		= BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SHOULD_LOCK,
+	.flags		= BLK_MQ_F_SHOULD_MERGE,
 };
 
 static int virtblk_probe(struct virtio_device *vdev)
@@ -791,7 +791,7 @@ static int virtblk_probe(struct virtio_device *vdev)
 		goto out_mempool;
 	}
 
-	q = vblk->disk->queue = blk_mq_init_queue(&virtio_mq_reg, NULL);
+	q = vblk->disk->queue = blk_mq_init_queue(&virtio_mq_reg);
 	if (!q) {
 		err = -ENOMEM;
 		goto out_put_disk;
