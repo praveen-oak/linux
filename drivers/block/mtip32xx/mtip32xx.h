@@ -75,7 +75,7 @@
 #define MTIP_MAX_SLOT_GROUPS	8
 
 /* Internal command tag. */
-#define MTIP_TAG_INTERNAL	0
+#define MTIP_TAG_INTERNAL	255
 
 /* Micron Vendor ID & P320x SSD Device ID */
 #define PCI_VENDOR_ID_MICRON    0x1344
