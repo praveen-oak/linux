@@ -327,7 +327,7 @@ struct mtip_cmd {
 				void *data,
 				int status);
 	/* Additional callback function that may be called by comp_func() */
-	void (*async_callback)(struct blk_mq_hw_ctx *hctx, struct request *, int status);
+	void (*async_callback)(struct request *, int status);
 
 	void *async_data; /* Addl. data passed to async_callback() */
 

@@ -58,7 +58,6 @@ struct virtblk_req
 {
 	struct request *req;
 	struct bio *bio;
-	struct blk_mq_hw_ctx *hctx;
 	struct virtio_blk_outhdr out_hdr;
 	struct virtio_scsi_inhdr in_hdr;
 	struct work_struct work;
@@ -227,7 +226,7 @@ static inline void virtblk_request_done(struct virtblk_req *vbr)
 		req->errors = (error != 0);
 	}
 
-	blk_mq_end_io(vbr->hctx, req, error);
+	blk_mq_end_io(req, error);
 	mempool_free(vbr, vblk->pool);
 }
 
@@ -311,7 +310,6 @@ static bool do_req(struct blk_mq_hw_ctx *hctx, struct virtio_blk *vblk,
 		return false;
 
 	vbr->req = req;
-	vbr->hctx = hctx;
 	vbr->bio = NULL;
 	if (req->cmd_flags & REQ_FLUSH) {
 		vbr->out_hdr.type = VIRTIO_BLK_T_FLUSH;

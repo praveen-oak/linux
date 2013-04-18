@@ -174,8 +174,7 @@ static void mtip_command_cleanup(struct driver_data *dd)
 
 			if (atomic_read(&command->active)
 			    && (command->async_callback)) {
-				command->async_callback(command->hctx, command->async_data,
-					-ENODEV);
+				command->async_callback(command->async_data, -ENODEV);
 				command->async_callback = NULL;
 				command->async_data = NULL;
 			}
@@ -582,8 +581,7 @@ static void mtip_timeout_function(unsigned long int data)
 
 		/* Call the async completion callback. */
 		if (likely(command->async_callback))
-			command->async_callback(command->hctx, command->async_data,
-										 -EIO);
+			command->async_callback(command->async_data, -EIO);
 
 		command->async_callback = NULL;
 		command->comp_func = NULL;
@@ -663,7 +661,7 @@ static void mtip_async_complete(struct mtip_port *port,
 
 	/* Upper layer callback */
 	if (likely(command->async_callback))
-		command->async_callback(command->hctx, command->async_data, cb_status);
+		command->async_callback(command->async_data, cb_status);
 
 	command->async_callback = NULL;
 	command->comp_func = NULL;
