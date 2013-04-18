@@ -31,6 +31,8 @@
 #include <linux/module.h>
 #include <linux/genhd.h>
 #include <linux/blkdev.h>
+#include <linux/blk-mq.h>
+#include <linux/numa.h>
 #include <linux/bio.h>
 #include <linux/dma-mapping.h>
 #include <linux/idr.h>
@@ -2542,28 +2544,21 @@ static int mtip_hw_ioctl(struct driver_data *dd, unsigned int cmd,
  * be called with the data parameter passed as the callback data.
  *
  * @dd       Pointer to the driver data structure.
- * @start    First sector to read.
- * @nsect    Number of sectors to read.
+ * @rq	     Request to read/write
  * @nents    Number of entries in scatter list for the read command.
- * @tag      The tag of this read command.
- * @callback Pointer to the function that should be called
- *	     when the read completes.
- * @data     Callback data passed to the callback function
- *	     when the read completes.
- * @dir      Direction (read or write)
  *
  * return value
  *	None
  */
-static void mtip_hw_submit_io(struct driver_data *dd, sector_t sector,
-			      int nsect, int nents, int tag, void *callback,
-			      void *data, int dir)
+static void mtip_hw_submit_io(struct driver_data *dd, struct request *rq,
+			      unsigned int nents)
 {
 	struct host_to_dev_fis	*fis;
 	struct mtip_port *port = dd->port;
-	struct mtip_cmd *command = &port->commands[tag];
-	int dma_dir = (dir == READ) ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
-	u64 start = sector;
+	struct mtip_cmd *command = &port->commands[rq->tag];
+	int dma_dir = rq_data_dir(rq) == READ ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
+	u64 start = blk_rq_pos(rq);
+	unsigned int nsect = blk_rq_sectors(rq);
 
 	/* Map the scatter list for DMA access */
 	nents = dma_map_sg(&dd->pdev->dev, command->sg, nents, dma_dir);
@@ -2580,8 +2575,10 @@ static void mtip_hw_submit_io(struct driver_data *dd, sector_t sector,
 	fis = command->command;
 	fis->type        = 0x27;
 	fis->opts        = 1 << 7;
-	fis->command     =
-		(dir == READ ? ATA_CMD_FPDMA_READ : ATA_CMD_FPDMA_WRITE);
+	if (rq_data_dir(rq) == READ)
+		fis->command = ATA_CMD_FPDMA_READ;
+	else
+		fis->command = ATA_CMD_FPDMA_WRITE;
 	fis->lba_low     = start & 0xFF;
 	fis->lba_mid     = (start >> 8) & 0xFF;
 	fis->lba_hi      = (start >> 16) & 0xFF;
@@ -2591,7 +2588,7 @@ static void mtip_hw_submit_io(struct driver_data *dd, sector_t sector,
 	fis->device	 = 1 << 6;
 	fis->features    = nsect & 0xFF;
 	fis->features_ex = (nsect >> 8) & 0xFF;
-	fis->sect_count  = ((tag << 3) | (tag >> 5));
+	fis->sect_count  = ((rq->tag << 3) | (rq->tag >> 5));
 	fis->sect_cnt_ex = 0;
 	fis->control     = 0;
 	fis->res2        = 0;
@@ -2609,30 +2606,28 @@ static void mtip_hw_submit_io(struct driver_data *dd, sector_t sector,
 	 * within this layer.
 	 */
 	command->comp_data = dd;
-	command->comp_func = mtip_async_complete;
-	command->direction = dma_dir;
+	command->async_data = rq;
+	command->async_callback = blk_mq_end_io;
 
 	/*
 	 * Set the completion function and data for the command passed
 	 * from the upper layer.
 	 */
-	command->async_data = data;
-	command->async_callback = callback;
+	command->async_data = rq;
+	command->async_callback = blk_mq_end_io;
 
 	/*
 	 * To prevent this command from being issued
 	 * if an internal command is in progress or error handling is active.
 	 */
 	if (port->flags & MTIP_PF_PAUSE_IO) {
-		set_bit(tag, port->cmds_to_issue);
+		set_bit(rq->tag, port->cmds_to_issue);
 		set_bit(MTIP_PF_ISSUE_CMDS_BIT, &port->flags);
 		return;
 	}
 
 	/* Issue the command to the hardware */
-	mtip_issue_ncq_command(port, tag);
-
-	return;
+	mtip_issue_ncq_command(port, rq->tag);
 }
 
 /*
@@ -3827,83 +3822,80 @@ static const struct block_device_operations mtip_block_ops = {
  *
  * @queue Pointer to the request queue. Unused other than to obtain
  *              the driver data structure.
- * @bio   Pointer to the BIO.
+ * @rq    Pointer to the request
  *
  */
-static void mtip_make_request(struct request_queue *queue, struct bio *bio)
+static int mtip_submit_request(struct request_queue *queue, struct request *rq)
 {
 	struct driver_data *dd = queue->queuedata;
 	struct scatterlist *sg;
-	struct bio_vec *bvec;
-	int nents = 0;
-	int tag = 0;
+	unsigned int nents;
 
 	if (unlikely(dd->dd_flag & MTIP_DDF_STOP_IO)) {
 		if (unlikely(test_bit(MTIP_DDF_REMOVE_PENDING_BIT,
 							&dd->dd_flag))) {
-			bio_endio(bio, -ENXIO);
-			return;
+			return -ENXIO;
 		}
-		if (unlikely(test_bit(MTIP_DDF_OVER_TEMP_BIT, &dd->dd_flag))) {
-			bio_endio(bio, -ENODATA);
-			return;
-		}
+		if (unlikely(test_bit(MTIP_DDF_OVER_TEMP_BIT, &dd->dd_flag)))
+			return -ENODATA;
 		if (unlikely(test_bit(MTIP_DDF_WRITE_PROTECT_BIT,
 							&dd->dd_flag) &&
-				bio_data_dir(bio))) {
-			bio_endio(bio, -ENODATA);
-			return;
+				(rq_data_dir(rq) == WRITE))) {
+			return -ENODATA;
 		}
-		if (unlikely(test_bit(MTIP_DDF_SEC_LOCK_BIT, &dd->dd_flag))) {
-			bio_endio(bio, -ENODATA);
-			return;
-		}
+		if (unlikely(test_bit(MTIP_DDF_SEC_LOCK_BIT, &dd->dd_flag)))
+			return -ENODATA;
 	}
 
-	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
-		bio_endio(bio, mtip_send_trim(dd, bio->bi_sector,
-						bio_sectors(bio)));
-		return;
+	if (rq->cmd_flags & REQ_DISCARD) {
+		int err;
+
+		err = mtip_send_trim(dd, blk_rq_pos(rq), blk_rq_sectors(rq));
+		blk_mq_end_io(rq, err);
+		return 0;
 	}
 
-	if (unlikely(!bio_has_data(bio))) {
-		blk_queue_flush(queue, 0);
-		bio_endio(bio, 0);
-		return;
-	}
+	sg = mtip_hw_get_scatterlist(dd, &rq->tag);
+	if (!sg)
+		return -EIO;
 
-	sg = mtip_hw_get_scatterlist(dd, &tag);
-	if (likely(sg != NULL)) {
-		blk_queue_bounce(queue, &bio);
-
-		if (unlikely((bio)->bi_vcnt > MTIP_MAX_SG)) {
-			dev_warn(&dd->pdev->dev,
+	if (unlikely(rq->nr_phys_segments > MTIP_MAX_SG)) {
+		dev_warn(&dd->pdev->dev,
 				"Maximum number of SGL entries exceeded\n");
-			bio_io_error(bio);
-			mtip_hw_release_scatterlist(dd, tag);
-			return;
-		}
+		mtip_hw_release_scatterlist(dd, rq->tag);
+		return -EIO;
+	}
 
-		/* Create the scatter list for this bio. */
-		bio_for_each_segment(bvec, bio, nents) {
-			sg_set_page(&sg[nents],
-					bvec->bv_page,
-					bvec->bv_len,
-					bvec->bv_offset);
-		}
-
-		/* Issue the read/write. */
-		mtip_hw_submit_io(dd,
-				bio->bi_sector,
-				bio_sectors(bio),
-				nents,
-				tag,
-				bio_endio,
-				bio,
-				bio_data_dir(bio));
-	} else
-		bio_io_error(bio);
+	/* Create the scatter list for this bio. */
+	nents = blk_rq_map_sg(queue, rq, sg);
+	/* Issue the read/write. */
+	mtip_hw_submit_io(dd, rq, nents);
+	return 0;
 }
+
+static int mtip_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	int ret;
+
+	ret = mtip_submit_request(hctx->queue, rq);
+	if (!ret)
+		return BLK_MQ_RQ_QUEUE_OK;
+
+	rq->errors = ret;
+	return BLK_MQ_RQ_QUEUE_ERROR;
+}
+
+static struct blk_mq_ops mtip_mq_ops = {
+	.queue_rq	= mtip_queue_rq,
+	.map_queue	= blk_mq_map_single_queue,
+};
+
+static struct blk_mq_reg mtip_mq_reg = {
+	.ops		= &mtip_mq_ops,
+	.nr_hw_queues	= 1,
+	.queue_depth	= 256,
+	.numa_node	= NUMA_NO_NODE,
+};
 
 /*
  * Block layer initialization function.
@@ -3980,16 +3972,13 @@ static int mtip_block_initialize(struct driver_data *dd)
 
 skip_create_disk:
 	/* Allocate the request queue. */
-	dd->queue = blk_alloc_queue_node(GFP_KERNEL, dd->numa_node);
+	dd->queue = blk_mq_init_queue(&mtip_mq_reg);
 	if (dd->queue == NULL) {
 		dev_err(&dd->pdev->dev,
 			"Unable to allocate request queue\n");
 		rv = -ENOMEM;
 		goto block_queue_alloc_init_error;
 	}
-
-	/* Attach our request function to the request queue. */
-	blk_queue_make_request(dd->queue, mtip_make_request);
 
 	dd->disk->queue		= dd->queue;
 	dd->queue->queuedata	= dd;
