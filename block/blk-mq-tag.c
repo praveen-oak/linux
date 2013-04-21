@@ -69,7 +69,8 @@ static unsigned int move_tags(unsigned int *dst, unsigned int *dst_nr,
 }
 
 /*
- * Wait on a free tag, move batch to map when we have it
+ * Wait on a free tag, move batch to map when we have it. Returns with
+ * local CPU irq flags saved in 'flags'.
  */
 static void wait_on_tags(struct blk_mq_tags *tags, struct blk_mq_tag_map **map,
 			 unsigned long *flags)
@@ -249,6 +250,8 @@ static void __wake_waiters(struct blk_mq_tags *tags, unsigned int nr)
 
 static void wake_waiters(struct blk_mq_tags *tags, unsigned int nr)
 {
+	BUG_ON(!irqs_disabled());
+
 	spin_lock(&tags->lock);
 	__wake_waiters(tags, nr);
 	spin_unlock(&tags->lock);
