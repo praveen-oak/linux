@@ -261,7 +261,7 @@ static void __blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
 {
 	struct blk_mq_tag_map *map;
 	unsigned long flags;
-	int has_waiter;
+	int waiters = 0;
 
 	BUG_ON(tag >= tags->nr_tags);
 
@@ -273,17 +273,17 @@ static void __blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
 	if (!map->has_free)
 		map->has_free = 1;
 
-	has_waiter = list_empty_careful(&tags->wait);
-	if (has_waiter || map->nr_free >= tags->max_cache) {
+	if (map->nr_free >= tags->max_cache ||
+	    !list_empty_careful(&tags->wait)) {
 		spin_lock(&tags->lock);
-		has_waiter = move_tags(tags->freelist, &tags->nr_free,
+		waiters = move_tags(tags->freelist, &tags->nr_free,
 					map->freelist, &map->nr_free,
 					tags->batch_move);
 		spin_unlock(&tags->lock);
 	}
 
-	if (has_waiter)
-		wake_waiters(tags, has_waiter);
+	if (waiters)
+		wake_waiters(tags, waiters);
 
 	local_irq_restore(flags);
 }
