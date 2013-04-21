@@ -34,7 +34,7 @@ struct blk_mq_tags {
 		unsigned int *freelist;
 		unsigned int nr_reserved;
 		unsigned int *reservelist;
-		wait_queue_head_t wait;
+		struct list_head wait;
 	} ____cacheline_aligned_in_smp;
 
 	struct blk_mq_tag_map __percpu *free_maps;
@@ -45,14 +45,27 @@ struct blk_mq_tags {
 	struct blk_mq_cpu_notifier cpu_notifier;
 };
 
-static void move_tags(unsigned int *dst, unsigned int *dst_nr,
-		      unsigned int *src, unsigned int *src_nr,
-		      unsigned int nr_to_move)
+struct blk_mq_tag_wait {
+	struct list_head list;
+	struct task_struct *task;
+};
+
+#define DEFINE_TAG_WAIT(name)						\
+	struct blk_mq_tag_wait name = {					\
+		.list		= LIST_HEAD_INIT((name).list),		\
+		.task		= current,				\
+	}
+
+static unsigned int move_tags(unsigned int *dst, unsigned int *dst_nr,
+			      unsigned int *src, unsigned int *src_nr,
+			      unsigned int nr_to_move)
 {
 	nr_to_move = min(nr_to_move, *src_nr);
 	*src_nr -= nr_to_move;
 	memcpy(dst + *dst_nr, src + *src_nr, sizeof(int) * nr_to_move);
 	*dst_nr += nr_to_move;
+
+	return nr_to_move;
 }
 
 /*
@@ -61,27 +74,32 @@ static void move_tags(unsigned int *dst, unsigned int *dst_nr,
 static void wait_on_tags(struct blk_mq_tags *tags, struct blk_mq_tag_map **map,
 			 unsigned long *flags)
 {
-	DEFINE_WAIT(wait);
+	DEFINE_TAG_WAIT(wait);
 
 	do {
-		prepare_to_wait(&tags->wait, &wait, TASK_UNINTERRUPTIBLE);
+		spin_lock_irqsave(&tags->lock, *flags);
 
 		if (tags->nr_free) {
-			local_irq_save(*flags);
 			*map = this_cpu_ptr(tags->free_maps);
-
-			spin_lock(&tags->lock);
 			move_tags((*map)->freelist, &(*map)->nr_free,
 					tags->freelist, &tags->nr_free,
 					tags->batch_move);
+
+			if (!list_empty(&wait.list))
+				list_del(&wait.list);
+
 			spin_unlock(&tags->lock);
 			break;
 		}
 
+		__set_current_state(TASK_UNINTERRUPTIBLE);
+
+		if (list_empty(&wait.list))
+			list_add_tail(&wait.list, &tags->wait);
+
+		spin_unlock_irqrestore(&tags->lock, *flags);
 		io_schedule();
 	} while (1);
-
-	finish_wait(&tags->wait, &wait);
 }
 
 #if NR_CPUS != 1
@@ -182,7 +200,7 @@ unsigned int blk_mq_get_tag(struct blk_mq_tags *tags, gfp_t gfp)
 unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp)
 {
 	unsigned int tag = BLK_MQ_TAG_FAIL;
-	DEFINE_WAIT(wait);
+	DEFINE_TAG_WAIT(wait);
 
 	if (unlikely(!tags->reserved_tags)) {
 		WARN_ON_ONCE(1);
@@ -190,26 +208,50 @@ unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp)
 	}
 
 	do {
-		prepare_to_wait(&tags->wait, &wait, TASK_UNINTERRUPTIBLE);
-
 		spin_lock_irq(&tags->lock);
 		if (tags->nr_reserved) {
 			tags->nr_reserved--;
 			tag = tags->reservelist[tags->nr_reserved];
-			spin_unlock_irq(&tags->lock);
 			break;
 		}
-
-		spin_unlock_irq(&tags->lock);
 
 		if (!(gfp & __GFP_WAIT))
 			break;
 
+		__set_current_state(TASK_UNINTERRUPTIBLE);
+
+		if (list_empty(&wait.list))
+			list_add_tail(&wait.list, &tags->wait);
+
+		spin_unlock_irq(&tags->lock);
 		io_schedule();
 	} while (1);
 
-	finish_wait(&tags->wait, &wait);
+	if (!list_empty(&wait.list))
+		list_del(&wait.list);
+
+	spin_unlock_irq(&tags->lock);
 	return tag;
+}
+
+static void __wake_waiters(struct blk_mq_tags *tags, unsigned int nr)
+{
+	while (nr && !list_empty(&tags->wait)) {
+		struct blk_mq_tag_wait *waiter;
+
+		waiter = list_entry(tags->wait.next, struct blk_mq_tag_wait,
+					list);
+		list_del_init(&waiter->list);
+		wake_up_process(waiter->task);
+		nr--;
+	}
+}
+
+static void wake_waiters(struct blk_mq_tags *tags, unsigned int nr)
+{
+	spin_lock(&tags->lock);
+	__wake_waiters(tags, nr);
+	spin_unlock(&tags->lock);
 }
 
 static void __blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
@@ -228,18 +270,19 @@ static void __blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
 	if (!map->has_free)
 		map->has_free = 1;
 
-	has_waiter = waitqueue_active(&tags->wait);
+	has_waiter = list_empty_careful(&tags->wait);
 	if (has_waiter || map->nr_free >= tags->max_cache) {
 		spin_lock(&tags->lock);
-		move_tags(tags->freelist, &tags->nr_free, map->freelist,
-				&map->nr_free, tags->batch_move);
+		has_waiter = move_tags(tags->freelist, &tags->nr_free,
+					map->freelist, &map->nr_free,
+					tags->batch_move);
 		spin_unlock(&tags->lock);
 	}
 
-	local_irq_restore(flags);
-
 	if (has_waiter)
-		wake_up(&tags->wait);
+		wake_waiters(tags, has_waiter);
+
+	local_irq_restore(flags);
 }
 
 static void __blk_mq_put_reserved_tag(struct blk_mq_tags *tags,
@@ -251,8 +294,8 @@ static void __blk_mq_put_reserved_tag(struct blk_mq_tags *tags,
 	tags->reservelist[tags->nr_reserved] = tag;
 	tags->nr_reserved++;
 
-	if (waitqueue_active(&tags->wait))
-		wake_up(&tags->wait);
+	if (!list_empty(&tags->wait))
+		__wake_waiters(tags, 1);
 
 	spin_unlock_irqrestore(&tags->lock, flags);
 }
@@ -363,6 +406,7 @@ struct blk_mq_tags *blk_mq_init_tags(unsigned int nr_tags,
 		goto err_cpumask;
 
 	spin_lock_init(&tags->lock);
+	INIT_LIST_HEAD(&tags->wait);
 	tags->nr_tags = nr_tags;
 	tags->reserved_tags = reserved_tags;
 	tags->max_cache = nr_tags / num_possible_cpus();
@@ -394,8 +438,6 @@ struct blk_mq_tags *blk_mq_init_tags(unsigned int nr_tags,
 		nr_tags--;
 		tags->nr_free++;
 	}
-
-	init_waitqueue_head(&tags->wait);
 
 	blk_mq_init_cpu_notifier(&tags->cpu_notifier, blk_mq_tag_notify, tags);
 	blk_mq_register_cpu_notifier(&tags->cpu_notifier);
