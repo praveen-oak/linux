@@ -176,17 +176,17 @@ unsigned int blk_mq_get_tag(struct blk_mq_tags *tags, gfp_t gfp)
 		wait_on_tags(tags, &map, &flags);
 	} while (1);
 
-	return -1U;
+	return BLK_MQ_TAG_FAIL;
 }
 
 unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp)
 {
-	unsigned int tag = -1U;
+	unsigned int tag = BLK_MQ_TAG_FAIL;
 	DEFINE_WAIT(wait);
 
 	if (unlikely(!tags->reserved_tags)) {
 		WARN_ON_ONCE(1);
-		return -1U;
+		return BLK_MQ_TAG_FAIL;
 	}
 
 	do {
@@ -333,6 +333,11 @@ struct blk_mq_tags *blk_mq_init_tags(unsigned int nr_tags,
 {
 	struct blk_mq_tags *tags;
 	size_t map_size;
+
+	if (nr_tags > BLK_MQ_TAG_MAX) {
+		pr_err("blk-mq: tag depth too large\n");
+		return NULL;
+	}
 
 	tags = kzalloc_node(sizeof(*tags), GFP_KERNEL, node);
 	if (!tags)

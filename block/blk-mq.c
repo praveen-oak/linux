@@ -61,7 +61,7 @@ static struct request *blk_mq_alloc_rq(struct blk_mq_hw_ctx *hctx, gfp_t gfp)
 	unsigned int tag;
 
 	tag = blk_mq_get_tag(hctx->tags, gfp);
-	if (tag != -1U) {
+	if (tag != BLK_MQ_TAG_FAIL) {
 		rq = &hctx->rqs[tag];
 		rq->tag = tag;
 

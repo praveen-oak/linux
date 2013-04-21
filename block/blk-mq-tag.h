@@ -11,4 +11,9 @@ extern unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp)
 extern void blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag);
 extern void blk_mq_tag_busy_iter(struct blk_mq_tags *tags, void (*fn)(void *data, unsigned long *), void *data);
 
+enum {
+	BLK_MQ_TAG_FAIL		= -1U,
+	BLK_MQ_TAG_MAX		= BLK_MQ_TAG_FAIL - 1,
+};
+
 #endif
