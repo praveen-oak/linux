@@ -38,6 +38,7 @@ struct blk_mq_reg {
 	struct blk_mq_ops	*ops;
 	unsigned int		nr_hw_queues;
 	unsigned int		queue_depth;
+	unsigned int		reserved_tags;
 	int			numa_node;
 	unsigned int		timeout;
 	unsigned int		flags;		/* BLK_MQ_F_* */

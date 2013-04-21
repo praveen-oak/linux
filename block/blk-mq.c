@@ -613,7 +613,8 @@ static void blk_mq_free_rq_map(struct blk_mq_hw_ctx *hctx)
 	blk_mq_free_tags(hctx->tags);
 }
 
-static int blk_mq_init_rq_map(struct blk_mq_hw_ctx *hctx)
+static int blk_mq_init_rq_map(struct blk_mq_hw_ctx *hctx,
+			      unsigned int reserved_tags)
 {
 	unsigned int cur_qd;
 	int i;
@@ -643,7 +644,7 @@ static int blk_mq_init_rq_map(struct blk_mq_hw_ctx *hctx)
 					__func__, cur_qd);
 	}
 
-	hctx->tags = blk_mq_init_tags(cur_qd, 0, hctx->numa_node);
+	hctx->tags = blk_mq_init_tags(cur_qd, reserved_tags, hctx->numa_node);
 	if (!hctx->tags) {
 		kfree(hctx->rqs);
 		return -ENOMEM;
@@ -736,7 +737,7 @@ struct request_queue *blk_mq_init_queue(struct blk_mq_reg *reg)
 		hctx->queue_depth = reg->queue_depth;
 		hctx->numa_node = reg->numa_node;
 
-		if (blk_mq_init_rq_map(hctx))
+		if (blk_mq_init_rq_map(hctx, reg->reserved_tags))
 			break;
 
 		hctx->ctxs = kmalloc_node(hctx->nr_ctx *
