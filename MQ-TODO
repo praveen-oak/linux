@@ -9,11 +9,13 @@ TODO list for multiqueue/new-queue. In no particular order.
   time. If someone else is already running the queue, we need
   not do anything. (partially done)
 
-- Barrier support
+- Ensure that IO ordering is more sane:
+	- List juggling should not reorder, or reverse order.
+	- Let a process "stick" to a mapped queue while it
+	  has IO in flight, instead of always dynamically
+	  mapping it based on the current CPU.
 
-- Improve the tagging to make it more per-cpu friendly. Things really fall
-  apart if we exhaust our tag map and have to wait. Cache the tags or
-  requests on a per ctx basis, ensuring that it's also fair between ctx's.
+- Barrier support
 
 - Add token based mq aware IO scheduler
 
