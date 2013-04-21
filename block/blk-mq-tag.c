@@ -1,0 +1,418 @@
+#include <linux/kernel.h>
+#include <linux/threads.h>
+#include <linux/module.h>
+#include <linux/mm.h>
+#include <linux/smp.h>
+#include <linux/cpu.h>
+
+#include <linux/blk-mq.h>
+#include "blk.h"
+#include "blk-mq.h"
+#include "blk-mq-tag.h"
+
+/*
+ * Per-cpu cache entries
+ */
+struct blk_mq_tag_map {
+	unsigned int ____cacheline_aligned_in_smp has_free;
+	unsigned int nr_free;
+	unsigned int freelist[];
+};
+
+/*
+ * Per tagged queue (tag address space) map
+ */
+struct blk_mq_tags {
+	unsigned int nr_tags;
+	unsigned int reserved_tags;
+	unsigned int batch_move;
+	unsigned int max_cache;
+
+	struct {
+		spinlock_t lock;
+		unsigned int nr_free;
+		unsigned int *freelist;
+		unsigned int nr_reserved;
+		unsigned int *reservelist;
+		wait_queue_head_t wait;
+	} ____cacheline_aligned_in_smp;
+
+	struct blk_mq_tag_map __percpu *free_maps;
+
+	unsigned long ipi_flags;
+	cpumask_var_t ipi_mask;
+
+	struct blk_mq_cpu_notifier cpu_notifier;
+};
+
+static void move_tags(unsigned int *dst, unsigned int *dst_nr,
+		      unsigned int *src, unsigned int *src_nr,
+		      unsigned int nr_to_move)
+{
+	nr_to_move = min(nr_to_move, *src_nr);
+	*src_nr -= nr_to_move;
+	memcpy(dst + *dst_nr, src + *src_nr, sizeof(int) * nr_to_move);
+	*dst_nr += nr_to_move;
+}
+
+/*
+ * Wait on a free tag, move batch to map when we have it
+ */
+static void wait_on_tags(struct blk_mq_tags *tags, struct blk_mq_tag_map **map,
+			 unsigned long *flags)
+{
+	DEFINE_WAIT(wait);
+
+	do {
+		prepare_to_wait(&tags->wait, &wait, TASK_UNINTERRUPTIBLE);
+
+		if (tags->nr_free) {
+			local_irq_save(*flags);
+			*map = this_cpu_ptr(tags->free_maps);
+
+			spin_lock(&tags->lock);
+			move_tags((*map)->freelist, &(*map)->nr_free,
+					tags->freelist, &tags->nr_free,
+					tags->batch_move);
+			spin_unlock(&tags->lock);
+			break;
+		}
+
+		io_schedule();
+	} while (1);
+
+	finish_wait(&tags->wait, &wait);
+}
+
+#if NR_CPUS != 1
+static void prune_cache(void *data)
+{
+	struct blk_mq_tags *tags = data;
+	struct blk_mq_tag_map *map;
+
+	map = per_cpu_ptr(tags->free_maps, smp_processor_id());
+
+	spin_lock(&tags->lock);
+	move_tags(tags->freelist, &tags->nr_free, map->freelist,
+			&map->nr_free, tags->batch_move);
+	spin_unlock(&tags->lock);
+}
+#endif
+
+static void ipi_local_caches(struct blk_mq_tags *tags, unsigned int this_cpu)
+{
+#if NR_CPUS != 1
+	unsigned int i;
+
+	/*
+	 * If bit is already set, ipi reclaim is already running. If
+	 * we set the bit, we now own the ipi_mask cpumask.
+	 */
+	if (test_and_set_bit_lock(0, &tags->ipi_flags))
+		return;
+
+	cpumask_clear(tags->ipi_mask);
+
+	for_each_online_cpu(i) {
+		struct blk_mq_tag_map *map = per_cpu_ptr(tags->free_maps, i);
+
+		if (!map->has_free)
+			continue;
+
+		cpumask_set_cpu(i, tags->ipi_mask);
+	}
+
+	smp_call_function_any(tags->ipi_mask, prune_cache, tags, 0);
+	clear_bit_unlock(0, &tags->ipi_flags);
+#endif
+}
+
+unsigned int blk_mq_get_tag(struct blk_mq_tags *tags, gfp_t gfp)
+{
+	struct blk_mq_tag_map *map;
+	unsigned int this_cpu;
+	unsigned long flags;
+	unsigned int tag;
+
+	local_irq_save(flags);
+	this_cpu = smp_processor_id();
+	map = per_cpu_ptr(tags->free_maps, this_cpu);
+
+	/*
+	 * Grab from local per-cpu cache, if we can
+	 */
+	do {
+		if (map->nr_free) {
+			map->nr_free--;
+			tag = map->freelist[map->nr_free];
+			if (!map->nr_free)
+				map->has_free = 0;
+			local_irq_restore(flags);
+			return tag;
+		}
+
+		/*
+		 * Grab from device map, if we can
+		 */
+		if (tags->nr_free) {
+			spin_lock(&tags->lock);
+			move_tags(map->freelist, &map->nr_free, tags->freelist,
+					&tags->nr_free, tags->batch_move);
+			spin_unlock(&tags->lock);
+			continue;
+		}
+
+		local_irq_restore(flags);
+
+		if (!(gfp & __GFP_WAIT))
+			break;
+
+		ipi_local_caches(tags, this_cpu);
+
+		/*
+		 * All are busy, wait. Returns with irqs disabled again
+		 * and potentiall new 'map' pointer.
+		 */
+		wait_on_tags(tags, &map, &flags);
+	} while (1);
+
+	return -1U;
+}
+
+unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp)
+{
+	unsigned int tag = -1U;
+	DEFINE_WAIT(wait);
+
+	if (unlikely(!tags->reserved_tags)) {
+		WARN_ON_ONCE(1);
+		return -1U;
+	}
+
+	do {
+		prepare_to_wait(&tags->wait, &wait, TASK_UNINTERRUPTIBLE);
+
+		spin_lock_irq(&tags->lock);
+		if (tags->nr_reserved) {
+			tags->nr_reserved--;
+			tag = tags->reservelist[tags->nr_reserved];
+			spin_unlock_irq(&tags->lock);
+			break;
+		}
+
+		spin_unlock_irq(&tags->lock);
+
+		if (!(gfp & __GFP_WAIT))
+			break;
+
+		io_schedule();
+	} while (1);
+
+	finish_wait(&tags->wait, &wait);
+	return tag;
+}
+
+static void __blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
+{
+	struct blk_mq_tag_map *map;
+	unsigned long flags;
+	int has_waiter;
+
+	BUG_ON(tag >= tags->nr_tags);
+
+	local_irq_save(flags);
+	map = this_cpu_ptr(tags->free_maps);
+
+	map->freelist[map->nr_free] = tag;
+	map->nr_free++;
+	if (!map->has_free)
+		map->has_free = 1;
+
+	has_waiter = waitqueue_active(&tags->wait);
+	if (has_waiter || map->nr_free >= tags->max_cache) {
+		spin_lock(&tags->lock);
+		move_tags(tags->freelist, &tags->nr_free, map->freelist,
+				&map->nr_free, tags->batch_move);
+		spin_unlock(&tags->lock);
+	}
+
+	local_irq_restore(flags);
+
+	if (has_waiter)
+		wake_up(&tags->wait);
+}
+
+static void __blk_mq_put_reserved_tag(struct blk_mq_tags *tags,
+				      unsigned int tag)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&tags->lock, flags);
+	tags->reservelist[tags->nr_reserved] = tag;
+	tags->nr_reserved++;
+
+	if (waitqueue_active(&tags->wait))
+		wake_up(&tags->wait);
+
+	spin_unlock_irqrestore(&tags->lock, flags);
+}
+
+void blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag)
+{
+	if (tag >= tags->nr_reserved)
+		__blk_mq_put_tag(tags, tag);
+	else
+		__blk_mq_put_reserved_tag(tags, tag);
+}
+
+void blk_mq_tag_busy_iter(struct blk_mq_tags *tags,
+			  void (*fn)(void *, unsigned long *), void *data)
+{
+	unsigned long flags, *tag_map;
+	unsigned int i, j;
+	size_t map_size;
+
+	map_size = ALIGN(tags->nr_tags, BITS_PER_LONG) / BITS_PER_LONG;
+	tag_map = kzalloc(map_size * sizeof(unsigned long), GFP_ATOMIC);
+	if (!tag_map)
+		return;
+
+	local_irq_save(flags);
+
+	for_each_online_cpu(i) {
+		struct blk_mq_tag_map *map = per_cpu_ptr(tags->free_maps, i);
+
+		for (j = 0; j < map->nr_free; j++)
+			__set_bit(map->freelist[j], tag_map);
+	}
+
+	if (tags->nr_free || tags->nr_reserved) {
+		spin_lock(&tags->lock);
+
+		if (tags->nr_reserved)
+			for (j = 0; j < tags->nr_reserved; j++)
+				__set_bit(tags->reservelist[j], tag_map);
+
+		if (tags->nr_free)
+			for (j = 0; j < tags->nr_free; j++)
+				__set_bit(tags->freelist[j], tag_map);
+
+		spin_unlock(&tags->lock);
+	}
+
+	local_irq_restore(flags);
+
+	fn(data, tag_map);
+	kfree(tag_map);
+}
+
+static void __cpuinit blk_mq_tag_notify(void *data, unsigned long action,
+					unsigned int cpu)
+{
+	struct blk_mq_tags *tags = data;
+
+	/*
+	 * Move entries from this CPU to global pool
+	 */
+	if (action == CPU_DEAD || action == CPU_DEAD_FROZEN) {
+		struct blk_mq_tag_map *map = per_cpu_ptr(tags->free_maps, cpu);
+		unsigned long flags;
+
+		if (map->nr_free) {
+			map->has_free = 0;
+			spin_lock_irqsave(&tags->lock, flags);
+			move_tags(tags->freelist, &tags->nr_free,
+				  map->freelist, &map->nr_free, map->nr_free);
+			spin_unlock_irqrestore(&tags->lock, flags);
+		}
+	}
+}
+
+struct blk_mq_tags *blk_mq_init_tags(unsigned int nr_tags,
+				     unsigned int reserved_tags, int node)
+{
+	struct blk_mq_tags *tags;
+	size_t map_size;
+
+	tags = kzalloc_node(sizeof(*tags), GFP_KERNEL, node);
+	if (!tags)
+		return NULL;
+
+	map_size = sizeof(struct blk_mq_tag_map) + nr_tags * sizeof(int);
+	tags->free_maps = __alloc_percpu(map_size, sizeof(void *));
+	if (!tags->free_maps)
+		goto err_free_maps;
+
+	tags->freelist = kmalloc_node(sizeof(int) * nr_tags, GFP_KERNEL, node);
+	if (!tags->freelist)
+		goto err_freelist;
+
+	if (reserved_tags) {
+		tags->reservelist = kmalloc_node(sizeof(int) * reserved_tags,
+							GFP_KERNEL, node);
+		if (!tags->reservelist)
+			goto err_reservelist;
+	}
+
+	if (!alloc_cpumask_var(&tags->ipi_mask, GFP_KERNEL))
+		goto err_cpumask;
+
+	spin_lock_init(&tags->lock);
+	tags->nr_tags = nr_tags;
+	tags->reserved_tags = reserved_tags;
+	tags->max_cache = nr_tags / num_possible_cpus();
+	if (tags->max_cache < 4)
+		tags->max_cache = 4;
+	else if (tags->max_cache > 64)
+		tags->max_cache = 64;
+
+	tags->batch_move = tags->max_cache / 2;
+
+	/*
+	 * Reserved tags are first
+	 */
+	if (reserved_tags) {
+		tags->nr_reserved = 0;
+		while (reserved_tags--) {
+			tags->reservelist[tags->nr_reserved] = tags->nr_reserved;
+			tags->nr_reserved++;
+		}
+	}
+
+	/*
+	 * Rest of the tags start at the queue list
+	 */
+	tags->nr_free = 0;
+	while (nr_tags - tags->nr_reserved) {
+		tags->freelist[tags->nr_free] = tags->nr_free +
+							tags->nr_reserved;
+		nr_tags--;
+		tags->nr_free++;
+	}
+
+	init_waitqueue_head(&tags->wait);
+
+	blk_mq_init_cpu_notifier(&tags->cpu_notifier, blk_mq_tag_notify, tags);
+	blk_mq_register_cpu_notifier(&tags->cpu_notifier);
+	return tags;
+
+err_cpumask:
+	kfree(tags->reservelist);
+err_reservelist:
+	kfree(tags->freelist);
+err_freelist:
+	free_percpu(tags->free_maps);
+err_free_maps:
+	kfree(tags);
+	return NULL;
+}
+
+void blk_mq_free_tags(struct blk_mq_tags *tags)
+{
+	blk_mq_unregister_cpu_notifier(&tags->cpu_notifier);
+	free_percpu(tags->free_maps);
+	free_cpumask_var(tags->ipi_mask);
+	kfree(tags->freelist);
+	kfree(tags->reservelist);
+	kfree(tags);
+}

@@ -3,6 +3,8 @@
 
 #include <linux/blkdev.h>
 
+struct blk_mq_tags;
+
 struct blk_mq_hw_ctx {
 	spinlock_t		lock;
 
@@ -19,8 +21,7 @@ struct blk_mq_hw_ctx {
 	unsigned long		*ctx_map;
 
 	struct request		*rqs;
-	unsigned long		*rq_map;
-	wait_queue_head_t	rq_wait;
+	struct blk_mq_tags	*tags;
 
 	unsigned long		queued;
 	unsigned long		run;

@@ -1,0 +1,14 @@
+#ifndef INT_BLK_MQ_TAG_H
+#define INT_BLK_MQ_TAG_H
+
+struct blk_mq_tags;
+
+extern struct blk_mq_tags *blk_mq_init_tags(unsigned int nr_tags, unsigned int reserved_tags, int node);
+extern void blk_mq_free_tags(struct blk_mq_tags *tags);
+
+extern unsigned int blk_mq_get_tag(struct blk_mq_tags *tags, gfp_t gfp);
+extern unsigned int blk_mq_get_reserved_tag(struct blk_mq_tags *tags, gfp_t gfp);
+extern void blk_mq_put_tag(struct blk_mq_tags *tags, unsigned int tag);
+extern void blk_mq_tag_busy_iter(struct blk_mq_tags *tags, void (*fn)(void *data, unsigned long *), void *data);
+
+#endif

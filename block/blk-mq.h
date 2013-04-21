@@ -23,4 +23,16 @@ struct blk_mq_ctx {
 	struct kobject		kobj;
 };
 
+struct blk_mq_cpu_notifier {
+	struct list_head list;
+	void *data;
+	void (*notify)(void *data, unsigned long action, unsigned int cpu);
+};
+
+void blk_mq_init_cpu_notifier(struct blk_mq_cpu_notifier *notifier,
+			      void (*fn)(void *, unsigned long, unsigned int),
+			      void *data);
+void blk_mq_register_cpu_notifier(struct blk_mq_cpu_notifier *notifier);
+void blk_mq_unregister_cpu_notifier(struct blk_mq_cpu_notifier *notifier);
+
 #endif
