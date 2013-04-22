@@ -1,0 +1,9 @@
+#
+# mtip32xx device driver configuration
+#
+
+config BLK_DEV_AHCI
+	tristate "Block Device Driver for AHCI"
+	depends on PCI 
+	help
+          This enables the block driver for AHCI.
