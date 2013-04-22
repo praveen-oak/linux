@@ -42,6 +42,6 @@ obj-$(CONFIG_BLK_DEV_PCIESSD_MTIP32XX)	+= mtip32xx/
 
 obj-$(CONFIG_BLK_DEV_RSXX) += rsxx/
 
-obj-$(CONFIG_BLK_DEV_NULL)	+= null.o
+obj-$(CONFIG_BLK_DEV_NULL)	+= null_blk.o
 
 swim_mod-y	:= swim.o swim_asm.o

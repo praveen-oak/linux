@@ -8,7 +8,7 @@
 #include <linux/blk-mq.h>
 #include <linux/hrtimer.h>
 
-struct nullb {
+struct nullblk {
 	struct list_head list;
 	unsigned int index;
 	struct request_queue *q;
@@ -17,10 +17,10 @@ struct nullb {
 	spinlock_t lock;
 };
 
-static LIST_HEAD(nullb_list);
+static LIST_HEAD(nullblk_list);
 static struct mutex lock;
 static int null_major;
-static int nullb_indexes;
+static int nullblk_indexes;
 
 struct completion_queue {
 	struct llist_head list;
@@ -281,17 +281,17 @@ static struct blk_mq_reg null_mq_reg = {
 	.nr_hw_queues = 1,
 };
 
-static void null_del_dev(struct nullb *nullb)
+static void null_del_dev(struct nullblk *nullblk)
 {
-	list_del_init(&nullb->list);
+	list_del_init(&nullblk->list);
 
-	del_gendisk(nullb->disk);
+	del_gendisk(nullblk->disk);
 	if (queue_mode == NULL_Q_MQ)
-		blk_mq_free_queue(nullb->q);
+		blk_mq_free_queue(nullblk->q);
 	else
-		blk_cleanup_queue(nullb->q);
-	put_disk(nullb->disk);
-	kfree(nullb);
+		blk_cleanup_queue(nullblk->q);
+	put_disk(nullblk->disk);
+	kfree(nullblk);
 }
 
 static int null_open(struct block_device *bdev, fmode_t mode)
@@ -313,16 +313,16 @@ static const struct block_device_operations null_fops = {
 static int null_add_dev(void)
 {
 	struct gendisk *disk;
-	struct nullb *nullb;
+	struct nullblk *nullblk;
 	sector_t size;
 
-	nullb = kmalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
-	if (!nullb)
+	nullblk = kmalloc_node(sizeof(*nullblk), GFP_KERNEL, home_node);
+	if (!nullblk)
 		return -ENOMEM;
 
-	memset(nullb, 0, sizeof(*nullb));
+	memset(nullblk, 0, sizeof(*nullblk));
 
-	spin_lock_init(&nullb->lock);
+	spin_lock_init(&nullblk->lock);
 
 	if (queue_mode == NULL_Q_MQ) {
 		null_mq_reg.numa_node = home_node;
@@ -345,53 +345,53 @@ static int null_add_dev(void)
 			}
 		}
 
-		nullb->q = blk_mq_init_queue(&null_mq_reg);
+		nullblk->q = blk_mq_init_queue(&null_mq_reg);
 	} else if (queue_mode == NULL_Q_BIO) {
-		nullb->q = blk_alloc_queue_node(GFP_KERNEL, home_node);
-		blk_queue_make_request(nullb->q, null_queue_bio);
+		nullblk->q = blk_alloc_queue_node(GFP_KERNEL, home_node);
+		blk_queue_make_request(nullblk->q, null_queue_bio);
 	} else {
-		nullb->q = blk_init_queue_node(null_request_fn, &nullb->lock, home_node);
-		if (nullb->q)
-			blk_queue_softirq_done(nullb->q, null_softirq_done_fn);
+		nullblk->q = blk_init_queue_node(null_request_fn, &nullblk->lock, home_node);
+		if (nullblk->q)
+			blk_queue_softirq_done(nullblk->q, null_softirq_done_fn);
 	}
 
-	if (!nullb->q) {
-		kfree(nullb);
+	if (!nullblk->q) {
+		kfree(nullblk);
 		return -ENOMEM;
 	}
 
-	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, nullb->q);
+	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, nullblk->q);
 
-	disk = nullb->disk = alloc_disk_node(1, home_node);
+	disk = nullblk->disk = alloc_disk_node(1, home_node);
 	if (!disk) {
 		if (queue_mode == NULL_Q_MQ)
-			blk_mq_free_queue(nullb->q);
+			blk_mq_free_queue(nullblk->q);
 		else
-			blk_cleanup_queue(nullb->q);
-		kfree(nullb);
+			blk_cleanup_queue(nullblk->q);
+		kfree(nullblk);
 		return -ENOMEM;
 	}
 
 	mutex_lock(&lock);
-	list_add_tail(&nullb->list, &nullb_list);
-	nullb->index = nullb_indexes++;
+	list_add_tail(&nullblk->list, &nullblk_list);
+	nullblk->index = nullblk_indexes++;
 	mutex_unlock(&lock);
 
-	blk_queue_logical_block_size(nullb->q, bs);
-	blk_queue_physical_block_size(nullb->q, bs);
+	blk_queue_logical_block_size(nullblk->q, bs);
+	blk_queue_physical_block_size(nullblk->q, bs);
 
 	size = gb * 1024 * 1024 * 1024ULL;
 	size /= (sector_t) bs;
 	set_capacity(disk, size);
 
 	disk->flags |= GENHD_FL_EXT_DEVT;
-	spin_lock_init(&nullb->lock);
+	spin_lock_init(&nullblk->lock);
 	disk->major		= null_major;
-	disk->first_minor	= nullb->index;
+	disk->first_minor	= nullblk->index;
 	disk->fops		= &null_fops;
-	disk->private_data	= nullb;
-	disk->queue		= nullb->q;
-	sprintf(disk->disk_name, "nullb%d", nullb->index);
+	disk->private_data	= nullblk;
+	disk->queue		= nullblk->q;
+	sprintf(disk->disk_name, "nullblk%d", nullblk->index);
 	add_disk(disk);
 	return 0;
 }
@@ -424,31 +424,31 @@ static int __init null_init(void)
 			cq->timer.function = null_request_timer_expired;
 	}
 
-	null_major = register_blkdev(0, "nullb");
+	null_major = register_blkdev(0, "nullblk");
 	if (null_major < 0)
 		return null_major;
 
 	for (i = 0; i < nr_devices; i++) {
 		if (null_add_dev()) {
-			unregister_blkdev(null_major, "nullb");
+			unregister_blkdev(null_major, "nullblk");
 			return -EINVAL;
 		}
 	}
 
-	pr_info("null: module loaded\n");
+	pr_info("null_blk: module loaded\n");
 	return 0;
 }
 
 static void __exit null_exit(void)
 {
-	struct nullb *nullb;
+	struct nullblk *nullblk;
 
-	unregister_blkdev(null_major, "nullb");
+	unregister_blkdev(null_major, "nullblk");
 
 	mutex_lock(&lock);
-	while (!list_empty(&nullb_list)) {
-		nullb = list_entry(nullb_list.next, struct nullb, list);
-		null_del_dev(nullb);
+	while (!list_empty(&nullblk_list)) {
+		nullblk = list_entry(nullblk_list.next, struct nullblk, list);
+		null_del_dev(nullblk);
 	}
 	mutex_unlock(&lock);
 }
