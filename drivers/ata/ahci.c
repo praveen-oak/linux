@@ -206,7 +206,7 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_VDEVICE(INTEL, 0x2824), board_ahci }, /* ICH8 */
 	{ PCI_VDEVICE(INTEL, 0x2829), board_ahci }, /* ICH8M */
 	{ PCI_VDEVICE(INTEL, 0x282a), board_ahci }, /* ICH8M */
-	{ PCI_VDEVICE(INTEL, 0x2922), board_ahci }, /* ICH9 */
+//	{ PCI_VDEVICE(INTEL, 0x2922), board_ahci }, /* ICH9 */
 	{ PCI_VDEVICE(INTEL, 0x2923), board_ahci }, /* ICH9 */
 	{ PCI_VDEVICE(INTEL, 0x2924), board_ahci }, /* ICH9 */
 	{ PCI_VDEVICE(INTEL, 0x2925), board_ahci }, /* ICH9 */
@@ -441,8 +441,8 @@ static const struct pci_device_id ahci_pci_tbl[] = {
 	{ PCI_DEVICE(0x1c44, 0x8000), board_ahci },
 
 	/* Generic, PCI class code for AHCI */
-	{ PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
-	  PCI_CLASS_STORAGE_SATA_AHCI, 0xffffff, board_ahci },
+//	{ PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID, PCI_ANY_ID,
+//	  PCI_CLASS_STORAGE_SATA_AHCI, 0xffffff, board_ahci },
 
 	{ }	/* terminate list */
 };
