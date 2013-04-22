@@ -20,7 +20,8 @@ struct blk_mq_hw_ctx {
 	unsigned int 		nr_ctx_map;
 	unsigned long		*ctx_map;
 
-	struct request		*rqs;
+	struct request		**rqs;
+	struct list_head	page_list;
 	struct blk_mq_tags	*tags;
 
 	unsigned long		queued;
@@ -30,6 +31,7 @@ struct blk_mq_hw_ctx {
 
 	unsigned int		queue_depth;
 	unsigned int		numa_node;
+	unsigned int		rq_pdu;		/* per-request extra data */
 
 	struct kobject		kobj;
 };
@@ -39,6 +41,7 @@ struct blk_mq_reg {
 	unsigned int		nr_hw_queues;
 	unsigned int		queue_depth;
 	unsigned int		reserved_tags;
+	unsigned int		rq_pdu;		/* per-request extra data */
 	int			numa_node;
 	unsigned int		timeout;
 	unsigned int		flags;		/* BLK_MQ_F_* */

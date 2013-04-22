@@ -62,7 +62,7 @@ static struct request *blk_mq_alloc_rq(struct blk_mq_hw_ctx *hctx, gfp_t gfp)
 
 	tag = blk_mq_get_tag(hctx->tags, gfp);
 	if (tag != BLK_MQ_TAG_FAIL) {
-		rq = &hctx->rqs[tag];
+		rq = hctx->rqs[tag];
 		rq->tag = tag;
 
 		return rq;
@@ -99,6 +99,17 @@ struct request *blk_mq_alloc_request(struct request_queue *q, int rw, gfp_t gfp)
 	return __blk_mq_alloc_request(q, ctx, rw, gfp);
 }
 
+/*
+ * Re-init and set pdu, if we have it
+ */
+static void blk_mq_rq_init(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	blk_rq_init(hctx->queue, rq);
+
+	if (hctx->rq_pdu)
+		rq->special = (void *) rq + sizeof(*rq);
+}
+
 static void blk_mq_free_request(struct request *rq)
 {
 	struct blk_mq_ctx *ctx = rq->mq_ctx;
@@ -109,7 +120,7 @@ static void blk_mq_free_request(struct request *rq)
 	ctx->rq_completed[rq_is_sync(rq)]++;
 
 	hctx = q->mq_ops->map_queue(q, ctx->index);
-	blk_rq_init(hctx->queue, rq);
+	blk_mq_rq_init(hctx, rq);
 	blk_mq_put_tag(hctx->tags, tag);
 }
 
@@ -229,7 +240,7 @@ static void blk_mq_timeout_check(void *__data, unsigned long *free_tags)
 		if (tag >= hctx->queue_depth)
 			break;
 
-		rq = &hctx->rqs[tag];
+		rq = hctx->rqs[tag];
 
 		if (!test_bit(REQ_ATOM_STARTED, &rq->atomic_flags))
 			continue;
@@ -609,49 +620,73 @@ EXPORT_SYMBOL(blk_mq_free_single_hw_queue);
 
 static void blk_mq_free_rq_map(struct blk_mq_hw_ctx *hctx)
 {
+	struct page *page;
+
+	while (!list_empty(&hctx->page_list)) {
+		page = list_entry(hctx->page_list.next, struct page, list);
+		list_del_init(&page->list);
+		__free_pages(page, 0);
+	}
+
 	kfree(hctx->rqs);
-	blk_mq_free_tags(hctx->tags);
+
+	if (hctx->tags)
+		blk_mq_free_tags(hctx->tags);
 }
 
 static int blk_mq_init_rq_map(struct blk_mq_hw_ctx *hctx,
 			      unsigned int reserved_tags)
 {
-	unsigned int cur_qd;
-	int i;
+	unsigned int i, j, entries_per_page;
+	size_t rq_size;
 
-	/*
-	 * We try to allocate all request structures up front. For highly
-	 * fragmented memory this might not be possible and as a result, we
-	 * lower the queue depth size and try again.
-	 */
-	cur_qd = hctx->queue_depth;
-	while (cur_qd > 0) {
-		size_t size = hctx->queue_depth * sizeof(struct request);
+	INIT_LIST_HEAD(&hctx->page_list);
 
-		hctx->rqs = kmalloc_node(size, GFP_KERNEL, hctx->numa_node);
-		if (hctx->rqs)
-			break;
-
-		cur_qd >>= 1;
-	}
-
+	hctx->rqs = kmalloc_node(hctx->queue_depth * sizeof(struct request *),
+					GFP_KERNEL, hctx->numa_node);
 	if (!hctx->rqs)
 		return -ENOMEM;
 
-	if (hctx->queue_depth != cur_qd) {
-		hctx->queue_depth = cur_qd;
-		pr_warn("%s: queue depth set to %u because of low memory\n",
-					__func__, cur_qd);
+	/*
+	 * rq_size is the size of the request plus driver payload, rounded
+	 * to the cacheline size.
+	 */
+	rq_size = round_up(sizeof(struct request) + hctx->rq_pdu,
+				cache_line_size());
+	entries_per_page = PAGE_SIZE / rq_size;
+	for (i = 0; i < hctx->queue_depth; i++) {
+		struct page *page;
+		int to_do;
+		void *p;
+
+		page = alloc_pages_node(hctx->numa_node, GFP_KERNEL, 0);
+		if (!page)
+			break;
+
+		list_add_tail(&page->list, &hctx->page_list);
+
+		p = page_address(page);
+		to_do = min(entries_per_page, hctx->queue_depth - i);
+		for (j = 0; j < to_do; j++) {
+			hctx->rqs[i] = p;
+			blk_mq_rq_init(hctx, hctx->rqs[i]);
+			p += rq_size;
+		}
 	}
 
-	hctx->tags = blk_mq_init_tags(cur_qd, reserved_tags, hctx->numa_node);
+	if (!i)
+		return -ENOMEM;
+	else if (i != hctx->queue_depth) {
+		hctx->queue_depth = i;
+		pr_warn("%s: queue depth set to %u because of low memory\n",
+					__func__, i);
+	}
+
+	hctx->tags = blk_mq_init_tags(hctx->queue_depth, reserved_tags, hctx->numa_node);
 	if (!hctx->tags) {
-		kfree(hctx->rqs);
+		blk_mq_free_rq_map(hctx);
 		return -ENOMEM;
 	}
-
-	for (i = 0; i < hctx->queue_depth; i++)
-		blk_rq_init(hctx->queue, &hctx->rqs[i]);
 
 	return 0;
 }
@@ -736,6 +771,7 @@ struct request_queue *blk_mq_init_queue(struct blk_mq_reg *reg)
 		hctx->flags = reg->flags;
 		hctx->queue_depth = reg->queue_depth;
 		hctx->numa_node = reg->numa_node;
+		hctx->rq_pdu = reg->rq_pdu;
 
 		if (blk_mq_init_rq_map(hctx, reg->reserved_tags))
 			break;
