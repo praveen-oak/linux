@@ -43,8 +43,9 @@
 #include <linux/device.h>
 #include <linux/dmi.h>
 #include <linux/gfp.h>
-//#include <linux/libata.h>
+#include <linux/blk-mq.h>
 #include "ahci.h"
+
 
 #define DRV_NAME	"ahci"
 #define DRV_VERSION	"3.0"
@@ -1109,13 +1110,43 @@ int ahci_init_interrupts(struct pci_dev *pdev, struct ahci_host_priv *hpriv)
 	return 0;
 }
 
-int ahci_host_start(struct ata_host *host)
+statuc int ahci_submit_request(struct request_queue *queue, struct bio *bio)
 {
 	return 0;
 }
 
+static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	int ret;
+
+	ret = ahci_submit_request(hctx->queue, rq);
+	if (!ret)
+		return BLK_MQ_RQ_QUEUE_OK;
+
+	rq->errors = ret;
+	return BLK_MQ_RQ_QUEUE_ERROR;
+}
+
+static struct blk_mq_ios = ahci_mq_ops = {
+		.queue_rq		= ahci_queue_rq,
+		.map_queue		= blk_mq_map_single_queue,
+};
+
+static struct blk_mq_reg ahci_mq_reg = {
+		.ops			= &ahci_mq_ops,
+		.nr_hw_queues	= 1,
+		.queue_depth	= 32, 
+		.numa_node		= NUMA_NO_NODE,
+};
+
+int ahci_host_start(struct ata_host *host)
+{
+	return ata_host_start(host);
+}
+
 int ahci_host_register(struct ata_host *host)
 {
+
 	return 0;
 }
 
@@ -1143,11 +1174,15 @@ int ahci_host_activate(struct ata_host *host, int irq, unsigned int n_msis,
 {
 	int i, rc;
 
+	if (n_msis <= 1)
+		return ata_host_activate(host, irq, ahci_interrupt,
+					IRQF_SHARED, &ahci_sht);
+
 	/* Sharing Last Message among several ports is not supported */
 	if (n_msis < host->n_ports)
 		return -EINVAL;
 
-	rc = ahci_host_start(host);
+	rc = ata_host_start(host);
 	if (rc)
 		return rc;
 
@@ -1162,7 +1197,7 @@ int ahci_host_activate(struct ata_host *host, int irq, unsigned int n_msis,
 	for (i = 0; i < host->n_ports; i++)
 		ata_port_desc(host->ports[i], "irq %d", irq + i);
 
-	rc = ahci_host_register(host);
+	rc = ata_host_register(host, sht);
 	if (rc)
 		goto out_free_all_irqs;
 
@@ -1373,11 +1408,6 @@ static int ahci_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	ahci_pci_print_info(host);
 
 	pci_set_master(pdev);
-
-	// Catch this in ahci_host_activate
-	if (hpriv->flags & AHCI_HFLAG_MULTI_MSI)
-		return ahci_host_activate(host, pdev->irq, n_msis, ahci_interrupt, 
-				IRQF_SHARED, &ahci_sht);
 
 	return ahci_host_activate(host, pdev->irq, n_msis, ahci_interrupt, 
 				IRQF_SHARED, &ahci_sht);
