@@ -3591,55 +3591,53 @@ void ata_scsi_simulate(struct ata_device *dev, struct scsi_cmnd *cmd)
 	}
 }
 
-int ata_scsi_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
+int ata_scsi_add_port(struct ata_port *ap, struct scsi_host_template *sht)
 {
-	int i, rc;
+	int rc;
+	struct Scsi_Host *shost;
 
-	for (i = 0; i < host->n_ports; i++) {
-		struct ata_port *ap = host->ports[i];
-		struct Scsi_Host *shost;
+	rc = -ENOMEM;
+	shost = scsi_host_alloc(sht, sizeof(struct ata_port *));
+	if (!shost)
+		goto err_alloc;
 
-		rc = -ENOMEM;
-		shost = scsi_host_alloc(sht, sizeof(struct ata_port *));
-		if (!shost)
-			goto err_alloc;
+	shost->eh_noresume = 1;
+	*(struct ata_port **)&shost->hostdata[0] = ap;
+	ap->scsi_host = shost;
 
-		shost->eh_noresume = 1;
-		*(struct ata_port **)&shost->hostdata[0] = ap;
-		ap->scsi_host = shost;
+	shost->transportt = ata_scsi_transport_template;
+	shost->unique_id = ap->print_id;
+	shost->max_id = 16;
+	shost->max_lun = 1;
+	shost->max_channel = 1;
+	shost->max_cmd_len = 16;
 
-		shost->transportt = ata_scsi_transport_template;
-		shost->unique_id = ap->print_id;
-		shost->max_id = 16;
-		shost->max_lun = 1;
-		shost->max_channel = 1;
-		shost->max_cmd_len = 16;
+	/* Schedule policy is determined by ->qc_defer()
+	 * callback and it needs to see every deferred qc.
+	 * Set host_blocked to 1 to prevent SCSI midlayer from
+	 * automatically deferring requests.
+	 */
+	shost->max_host_blocked = 1;
 
-		/* Schedule policy is determined by ->qc_defer()
-		 * callback and it needs to see every deferred qc.
-		 * Set host_blocked to 1 to prevent SCSI midlayer from
-		 * automatically deferring requests.
-		 */
-		shost->max_host_blocked = 1;
-
-		rc = scsi_add_host_with_dma(ap->scsi_host,
-						&ap->tdev, ap->host->dev);
-		if (rc)
-			goto err_add;
-	}
+	rc = scsi_add_host_with_dma(ap->scsi_host,
+					&ap->tdev, ap->host->dev);
+	if (rc)
+		goto err_add;
 
 	return 0;
 
  err_add:
-	scsi_host_put(host->ports[i]->scsi_host);
+	scsi_host_put(ap->scsi_host);
  err_alloc:
-	while (--i >= 0) {
-		struct Scsi_Host *shost = host->ports[i]->scsi_host;
-
-		scsi_remove_host(shost);
-		scsi_host_put(shost);
-	}
 	return rc;
+}
+
+void ata_scsi_remove_port(struct ata_port *port)
+{
+	struct Scsi_Host *shost = port->scsi_host;
+
+	scsi_remove_host(shost);
+	scsi_host_put(shost);
 }
 
 void ata_scsi_scan_host(struct ata_port *ap, int sync)
