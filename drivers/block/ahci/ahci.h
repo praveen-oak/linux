@@ -365,9 +365,7 @@ irqreturn_t ahci_interrupt(int irq, void *dev_instance);
 irqreturn_t ahci_hw_interrupt(int irq, void *dev_instance);
 irqreturn_t ahci_thread_fn(int irq, void *dev_instance);
 void ahci_print_info(struct ata_host *host, const char *scc_s);
-int ahci_host_activate(struct ata_host *host, int irq, unsigned int n_msis,
-				irq_handler_t irq_handler, unsigned long irq_flags,
-				struct scsi_host_template *sht);
+int ahci_host_activate(struct ata_host *host, int irq, unsigned int n_msis);
 
 static inline void __iomem *__ahci_port_base(struct ata_host *host,
 					     unsigned int port_no)

@@ -69,6 +69,8 @@ static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc);
 static bool ahci_qc_fill_rtf(struct ata_queued_cmd *qc);
 static int ahci_port_start(struct ata_port *ap);
 static void ahci_port_stop(struct ata_port *ap);
+static int ahci_register(struct ata_port *ap);
+static int ahci_deregister(struct ata_port *ap);
 static void ahci_qc_prep(struct ata_queued_cmd *qc);
 static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc);
 static void ahci_freeze(struct ata_port *ap);
@@ -176,8 +178,8 @@ struct ata_port_operations ahci_ops = {
 	.port_start		= ahci_port_start,
 	.port_stop		= ahci_port_stop,
 
-	 blk_register	= ahci_register,
-	 blk_deregister	= ahci_deregister,
+	.blk_register	= ahci_register,
+	.blk_deregister	= ahci_deregister,
 };
 EXPORT_SYMBOL_GPL(ahci_ops);
 
