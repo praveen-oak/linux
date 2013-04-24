@@ -137,8 +137,9 @@ static inline void ata_acpi_unbind(struct ata_device *dev) { }
 #endif
 
 /* libata-scsi.c */
-extern int ata_scsi_add_hosts(struct ata_host *host,
+extern int ata_scsi_add_port(struct ata_port *ap,
 			      struct scsi_host_template *sht);
+extern void ata_scsi_remove_port(struct ata_port *ap);
 extern void ata_scsi_scan_host(struct ata_port *ap, int sync);
 extern int ata_scsi_offline_dev(struct ata_device *dev);
 extern void ata_scsi_media_change_notify(struct ata_device *dev);
@@ -149,6 +150,15 @@ extern int ata_bus_probe(struct ata_port *ap);
 extern int ata_scsi_user_scan(struct Scsi_Host *shost, unsigned int channel,
 			      unsigned int id, unsigned int lun);
 
+/* libata-blk.c */
+extern int ata_blk_add_port(struct ata_port *ap);
+extern void ata_blk_remove_port(struct ata_port *ap);
+extern void ata_blk_scan_host(struct ata_port *ap, int sync);
+extern int ata_blk_offline_dev(struct ata_device *dev);
+extern void ata_blk_media_change_notify(struct ata_device *dev);
+extern void ata_blk_hotplug(struct work_struct *work);
+extern void ata_schedule_blk_eh(struct Scsi_Host *shost);
+extern void ata_blk_dev_rescan(struct work_struct *work);
 
 /* libata-eh.c */
 extern unsigned long ata_internal_cmd_timeout(struct ata_device *dev, u8 cmd);
