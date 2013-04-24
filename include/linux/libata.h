@@ -857,6 +857,13 @@ struct ata_port_operations {
 	void (*end_eh)(struct ata_port *ap);
 
 	/*
+	 * Optional libscsi bypass - Device driver handles block layer
+	 * registration.
+	 */
+	int (*blk_register)(struct ata_port *ap);
+	int (*blk_deregister)(struct ata_port *ap);
+
+	/*
 	 * Optional features
 	 */
 	int  (*scr_read)(struct ata_link *link, unsigned int sc_reg, u32 *val);

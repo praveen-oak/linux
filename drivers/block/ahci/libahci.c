@@ -175,6 +175,9 @@ struct ata_port_operations ahci_ops = {
 #endif
 	.port_start		= ahci_port_start,
 	.port_stop		= ahci_port_stop,
+
+	 blk_register	= ahci_register,
+	 blk_deregister	= ahci_deregister,
 };
 EXPORT_SYMBOL_GPL(ahci_ops);
 
@@ -2314,6 +2317,16 @@ static void ahci_port_stop(struct ata_port *ap)
 	rc = ahci_deinit_port(ap, &emsg);
 	if (rc)
 		ata_port_warn(ap, "%s (%d)\n", emsg, rc);
+}
+
+static int ahci_register(struct ata_port *ap)
+{
+	return 0;
+}
+
+static int ahci_deregister(struct ata_port *ap)
+{
+	return 0;
 }
 
 void ahci_print_info(struct ata_host *host, const char *scc_s)
