@@ -6091,6 +6091,39 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 	ata_scsi_scan_host(ap, 1);
 }
 
+static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
+{
+	int i, rc;
+
+	for (i = 0; i< host->n_ports;i++) {
+		struct ata_port *ap = host->ports[i];
+
+		rc = -ENOMEM;
+
+		if (ap->ops->blk_register)
+			rc = ata_blk_add_port(ap);
+		else
+			rc = ata_scsi_add_port(ap, sht);
+
+		if (rc)
+			goto err_alloc;
+	}
+
+	return rc;
+
+err_alloc:
+	while (--i >= 0) {
+		struct ata_port *ap = host->ports[i];
+
+		if (ap->ops->blk_register)
+			ata_blk_remove_port(ap);
+		else
+			ata_scsi_remove_port(ap);
+	}
+
+	return rc;
+}
+
 /**
  *	ata_host_register - register initialized ATA host
  *	@host: ATA host to register
@@ -6138,7 +6171,7 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 		}
 	}
 
-	rc = ata_scsi_add_hosts(host, sht);
+	rc = ata_add_hosts(host, sht);
 	if (rc)
 		goto err_tadd;
 
