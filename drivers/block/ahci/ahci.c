@@ -1110,34 +1110,6 @@ int ahci_init_interrupts(struct pci_dev *pdev, struct ahci_host_priv *hpriv)
 	return 0;
 }
 
-static int ahci_submit_request(struct request_queue *queue, struct request *req)
-{
-	return 0;
-}
-
-static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
-{
-	int ret;
-
-	ret = ahci_submit_request(hctx->queue, rq);
-	if (!ret)
-		return BLK_MQ_RQ_QUEUE_OK;
-
-	rq->errors = ret;
-	return BLK_MQ_RQ_QUEUE_ERROR;
-}
-
-static struct blk_mq_ops ahci_mq_ops = {
-		.queue_rq		= ahci_queue_rq,
-		.map_queue		= blk_mq_map_single_queue,
-};
-
-static struct blk_mq_reg ahci_mq_reg = {
-		.ops			= &ahci_mq_ops,
-		.nr_hw_queues	= 1,
-		.queue_depth	= 32, 
-		.numa_node		= NUMA_NO_NODE,
-};
 
 /**
  *	ahci_host_activate - start AHCI host, request IRQs and register it

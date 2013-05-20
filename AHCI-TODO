@@ -1,1 +1,6 @@
 * Move SATA functions into a shared file for both ATA and block AHCI.
+* Move SATA functions into a shared file for both ATA and block AHCI.
+* Enable ahci_set_aggressive_devslp again
+* Do not initialize ahci_major... as there can be multiple devices,
+  this will pose a problem later on.
+

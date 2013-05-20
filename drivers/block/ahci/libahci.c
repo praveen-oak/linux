@@ -41,7 +41,13 @@
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
+#include <linux/blk-mq.h>
 #include "ahci.h"
+
+static LIST_HEAD(ahci_blk_list);
+static DEFINE_MUTEX(lock);
+static int ahci_major;
+static int ahci_minor_index;
 
 static int ahci_skip_host_reset;
 int ahci_ignore_sss;
@@ -61,16 +67,18 @@ static ssize_t ahci_led_store(struct ata_port *ap, const char *buf,
 static ssize_t ahci_transmit_led_message(struct ata_port *ap, u32 state,
 					ssize_t size);
 
-
-
 static int ahci_scr_read(struct ata_link *link, unsigned int sc_reg, u32 *val);
 static int ahci_scr_write(struct ata_link *link, unsigned int sc_reg, u32 val);
 static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc);
 static bool ahci_qc_fill_rtf(struct ata_queued_cmd *qc);
 static int ahci_port_start(struct ata_port *ap);
 static void ahci_port_stop(struct ata_port *ap);
-static int ahci_register(struct ata_port *ap);
-static int ahci_deregister(struct ata_port *ap);
+
+static int ahci_host_register(struct ata_host *host);
+static int ahci_host_deregister(struct ata_host *host);
+static int ahci_port_register(struct ata_port *ap);
+static int ahci_port_deregister(struct ata_port *ap);
+
 static void ahci_qc_prep(struct ata_queued_cmd *qc);
 static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc);
 static void ahci_freeze(struct ata_port *ap);
@@ -143,6 +151,15 @@ struct device_attribute *ahci_sdev_attrs[] = {
 };
 EXPORT_SYMBOL_GPL(ahci_sdev_attrs);
 
+struct ahci_blk {
+	struct list_head list;
+	unsigned int index;
+	struct request_queue *q;
+	struct gendisk *disk;
+	
+	spinlock_t lock;
+};
+
 struct ata_port_operations ahci_ops = {
 	.inherits		= &sata_pmp_port_ops,
 
@@ -178,8 +195,11 @@ struct ata_port_operations ahci_ops = {
 	.port_start		= ahci_port_start,
 	.port_stop		= ahci_port_stop,
 
-	.blk_register	= ahci_register,
-	.blk_deregister	= ahci_deregister,
+	.blk_host_register		= ahci_host_register,
+	.blk_host_deregister	= ahci_host_deregister,
+
+	.blk_port_register		= ahci_port_register,
+	.blk_port_deregister	= ahci_port_deregister,
 };
 EXPORT_SYMBOL_GPL(ahci_ops);
 
@@ -2321,12 +2341,131 @@ static void ahci_port_stop(struct ata_port *ap)
 		ata_port_warn(ap, "%s (%d)\n", emsg, rc);
 }
 
-static int ahci_register(struct ata_port *ap)
+static int ahci_submit_request(struct request_queue *q, struct request *rq)
+{
+	pr_err("Retrieved a request that I won't answer anything ;p\n");
+	return 0;
+}
+
+static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	int ret;
+
+	ret = ahci_submit_request(hctx->queue, rq);
+	if (!ret)
+		return BLK_MQ_RQ_QUEUE_OK;
+
+	rq->errors = ret;
+	return BLK_MQ_RQ_QUEUE_ERROR;
+}
+
+static struct blk_mq_ops ahci_mq_ops = {
+		.queue_rq		= ahci_queue_rq,
+		.map_queue		= blk_mq_map_single_queue,
+};
+
+static struct blk_mq_reg ahci_mq_reg = {
+		.ops			= &ahci_mq_ops,
+		.nr_hw_queues	= 1,
+		.queue_depth	= 32, 
+		.numa_node		= NUMA_NO_NODE,
+};
+
+static int ahci_blk_open(struct block_device *bdev, fmode_t mode)
 {
 	return 0;
 }
 
-static int ahci_deregister(struct ata_port *ap)
+static int ahci_blk_release(struct gendisk *disk, fmode_t mode)
+{
+	return 0;
+}
+
+static const struct block_device_operations ahci_blk_fops = {
+	.owner =	THIS_MODULE,
+	.open =		ahci_blk_open,
+	.release =	ahci_blk_release,
+};
+
+static int ahci_host_register(struct ata_host *host)
+{
+	int err;
+	err = register_blkdev(0, "ahci");
+
+	if (err <= 0)
+	{
+		pr_err("Unable to register block device (%d)\n", err);
+		return -EBUSY;
+	}
+
+	ahci_major = err;
+
+	return 0;
+}
+
+static int ahci_host_deregister(struct ata_host *host)
+{
+	return 0;
+}
+
+/*
+ * TODO: Check if the port has a SSD attached. If, 
+ * use MQ, else SQ blk layer.
+ * Lookup code to figure out which node a device is attached.
+ */
+static int ahci_port_register(struct ata_port *port)
+{
+	int size;
+	struct gendisk *disk;
+	struct ahci_blk *ahci_blk;
+
+	ahci_blk = kmalloc_node(sizeof(*ahci_blk), GFP_KERNEL, NUMA_NO_NODE);
+	if (!ahci_blk)
+		return -ENOMEM;
+
+	memset(ahci_blk, 0, sizeof(*ahci_blk));
+
+	ahci_blk->q = blk_mq_init_queue(&ahci_mq_reg);
+
+	if (!ahci_blk->q) {
+		kfree(ahci_blk);
+		return -ENOMEM;
+	}
+	
+	disk = ahci_blk->disk = alloc_disk_node(1, NUMA_NO_NODE);
+	if (!disk) {
+		blk_mq_free_queue(ahci_blk->q);
+		kfree(ahci_blk);
+		return -ENOMEM;
+	}
+
+	mutex_lock(&lock);
+	list_add_tail(&(ahci_blk->list), &ahci_blk_list);
+	ahci_blk->index = ahci_minor_index++;
+	mutex_unlock(&lock);
+
+	//FIXME MQ do not instantiate these, or?
+	//blk_queue_logical_block_size(ahci_blk->q, 512);
+	//blk_queue_physical_block_size(ahci_blk->q, 512);
+
+	size = 10 * 1024 * 1024 * 1024ULL;
+	size /= (sector_t) 512;
+	set_capacity(disk, size);
+
+	disk->flags |= GENHD_FL_EXT_DEVT;
+	spin_lock_init(&ahci_blk->lock);
+	disk->major		= ahci_major;
+	disk->first_minor	= ahci_blk->index;
+	disk->fops		= &ahci_blk_fops;
+	disk->private_data	= ahci_blk;
+	disk->queue		= ahci_blk->q;
+	sprintf(disk->disk_name, "ahci%d", ahci_blk->index);
+	add_disk(disk);
+
+	return 0;
+}
+
+static int ahci_port_deregister(struct ata_port *port)
 {
 	return 0;
 }

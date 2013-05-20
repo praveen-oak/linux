@@ -9,8 +9,13 @@
 
 #include "libata.h"
 
+
+
+
 int ata_blk_add_port(struct ata_port *ap)
 {
+	int err;
+
 	return 0;
 }
 

@@ -860,8 +860,12 @@ struct ata_port_operations {
 	 * Optional libscsi bypass - Device driver handles block layer
 	 * registration.
 	 */
-	int (*blk_register)(struct ata_port *ap);
-	int (*blk_deregister)(struct ata_port *ap);
+	int (*blk_host_register)(struct ata_host *host);
+	int (*blk_host_deregister)(struct ata_host *host);
+
+	int (*blk_port_register)(struct ata_port *ap);
+	int (*blk_port_deregister)(struct ata_port *ap);
+
 
 	/*
 	 * Optional features

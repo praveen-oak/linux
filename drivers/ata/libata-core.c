@@ -6095,13 +6095,20 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 {
 	int i, rc;
 
+	if (host->ops->blk_host_register) {
+		rc = host->ops->blk_host_register(host);
+
+		if (rc)
+			goto err_reg;
+	}
+
 	for (i = 0; i< host->n_ports;i++) {
 		struct ata_port *ap = host->ports[i];
 
 		rc = -ENOMEM;
 
-		if (ap->ops->blk_register)
-			rc = ata_blk_add_port(ap);
+		if (ap->ops->blk_port_register)
+			rc = ap->ops->blk_port_register(ap);
 		else
 			rc = ata_scsi_add_port(ap, sht);
 
@@ -6115,12 +6122,12 @@ err_alloc:
 	while (--i >= 0) {
 		struct ata_port *ap = host->ports[i];
 
-		if (ap->ops->blk_register)
-			ata_blk_remove_port(ap);
+		if (ap->ops->blk_port_deregister)
+			ap->ops->blk_port_deregister(ap);
 		else
 			ata_scsi_remove_port(ap);
 	}
-
+err_reg:
 	return rc;
 }
 
