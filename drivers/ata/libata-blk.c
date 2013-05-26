@@ -24,7 +24,7 @@ void ata_blk_remove_port(struct ata_port *ap)
 
 }
 
-void ata_blk_scan_host(struct ata_port *ap, int sync)
+oid ata_blk_scan_host(struct ata_port *ap, int sync)
 {
 
 }

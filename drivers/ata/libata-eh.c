@@ -1129,6 +1129,9 @@ static void __ata_port_freeze(struct ata_port *ap)
 
 	ap->pflags |= ATA_PFLAG_FROZEN;
 
+	WARN_ON(1);
+	printk("I was frooooooooooooooozen\n");
+
 	DPRINTK("ata%u port frozen\n", ap->print_id);
 }
 

@@ -4716,6 +4716,20 @@ void swap_buf_le16(u16 *buf, unsigned int buf_words)
 #endif /* __BIG_ENDIAN */
 }
 
+struct ata_device *ata_find_dev(struct ata_port *ap, int devno)
+{
+	if (!sata_pmp_attached(ap)) {
+		if (likely(devno < ata_link_max_devices(&ap->link)))
+			return &ap->link.device[devno];
+	} else {
+		if (likely(devno < ap->nr_pmp_links))
+			return &ap->pmp_link[devno].device[0];
+	}
+
+	return NULL;
+}
+
+
 /**
  *	ata_qc_new - Request an available ATA command, for queueing
  *	@ap: target port
@@ -4742,6 +4756,39 @@ static struct ata_queued_cmd *ata_qc_new(struct ata_port *ap)
 
 	if (qc)
 		qc->tag = i;
+
+	return qc;
+}
+
+struct ata_queued_cmd *ata_qc_new_init_mq(struct ata_port *ap, int tag)
+{
+	struct ata_queued_cmd *qc = NULL;
+	printk("fdskjfjklsdjfksdjkdflslkjf\n");
+
+	if (ap->pflags & ATA_PFLAG_FROZEN)
+		printk("wooooooo?!?!?!?\n");
+	
+	if (unlikely(ap->pflags & ATA_PFLAG_FROZEN))
+		return NULL;
+
+	//FIX: Should I set qc->tag here? ... if its cached and reused,
+	//then it shouldn't be needed. Figure out why it is set in 
+	//ata_qc_new.....
+	//TODO: Init all qc before use. No reason to do this for 
+	//each request.
+	printk("larlarlalr\n");
+	qc = __ata_qc_from_tag(ap, tag);
+	printk("w++++++tttt\n");
+	if (qc)
+	{
+		qc->tag = tag;
+		qc->ap = ap;
+
+		// TODO FIX: This might not work.
+		qc->dev = ata_find_dev(ap, 0);
+		printk("Created qc with %p\n", &qc->dev);
+		ata_qc_reinit(qc);
+	}
 
 	return qc;
 }
@@ -5999,7 +6046,7 @@ int ata_host_start(struct ata_host *host)
 				goto err_out;
 			}
 		}
-		ata_eh_freeze_port(ap);
+		//ata_eh_freeze_port(ap);
 	}
 
 	if (start_dr)

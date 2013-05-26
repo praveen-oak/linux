@@ -43,6 +43,7 @@
 #include <linux/device.h>
 #include <linux/blk-mq.h>
 #include "ahci.h"
+#include "../../ata/libata.h"
 
 static LIST_HEAD(ahci_blk_list);
 static DEFINE_MUTEX(lock);
@@ -156,7 +157,8 @@ struct ahci_blk {
 	unsigned int index;
 	struct request_queue *q;
 	struct gendisk *disk;
-	
+	struct ata_port *ap;
+
 	spinlock_t lock;
 };
 
@@ -809,7 +811,12 @@ static void ahci_start_port(struct ata_port *ap)
 	if (ap->flags & ATA_FLAG_SW_ACTIVITY)
 		ata_for_each_link(link, ap, EDGE)
 			ahci_init_sw_activity(link);
+	
+	printk("Yelllllllllllooww2\n");
+	ap->pflags &= ~ATA_PFLAG_FROZEN;
 
+	WARN_ON(ap->pflags & ATA_PFLAG_FROZEN);
+	
 }
 
 static int ahci_deinit_port(struct ata_port *ap, const char **emsg)
@@ -2252,6 +2259,7 @@ static int ahci_port_start(struct ata_port *ap)
 	dma_addr_t mem_dma;
 	size_t dma_sz, rx_fis_sz;
 
+	printk("retardoooooooooooooooooo\n");
 	pp = devm_kzalloc(dev, sizeof(*pp), GFP_KERNEL);
 	if (!pp)
 		return -ENOMEM;
@@ -2343,7 +2351,21 @@ static void ahci_port_stop(struct ata_port *ap)
 
 static int ahci_submit_request(struct request_queue *q, struct request *rq)
 {
-	pr_err("Retrieved a request that I won't answer anything ;p\n");
+	struct ahci_blk *p = q->queuedata;
+	struct ata_port *ap = p->ap;
+	struct ata_queued_cmd *qc = NULL;
+	
+	// Create qc (ata_queued_cmd) 
+	// issue qc
+	// retrieve the completion
+
+	printk("Gone fishing for tags %p\n", ap);
+	qc = ata_qc_new_init_mq(ap, rq->tag);
+	
+	printk("Got tag\n");
+	ata_qc_issue(qc);
+	
+	pr_err("Retrieved a request that I won't answer anything %i;p\n", p->index);
 	return 0;
 }
 
@@ -2362,6 +2384,8 @@ static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 static struct blk_mq_ops ahci_mq_ops = {
 		.queue_rq		= ahci_queue_rq,
 		.map_queue		= blk_mq_map_single_queue,
+		.alloc_hctx		= blk_mq_alloc_single_hw_queue,
+		.free_hctx		= blk_mq_free_single_hw_queue,
 };
 
 static struct blk_mq_reg ahci_mq_reg = {
@@ -2432,6 +2456,8 @@ static int ahci_port_register(struct ata_port *port)
 		return -ENOMEM;
 	}
 	
+	ahci_blk->q->queuedata = ahci_blk;
+
 	disk = ahci_blk->disk = alloc_disk_node(1, NUMA_NO_NODE);
 	if (!disk) {
 		blk_mq_free_queue(ahci_blk->q);
@@ -2439,18 +2465,21 @@ static int ahci_port_register(struct ata_port *port)
 		return -ENOMEM;
 	}
 
-	mutex_lock(&lock);
-	list_add_tail(&(ahci_blk->list), &ahci_blk_list);
-	ahci_blk->index = ahci_minor_index++;
-	mutex_unlock(&lock);
-
-	//FIXME MQ do not instantiate these, or?
-	//blk_queue_logical_block_size(ahci_blk->q, 512);
-	//blk_queue_physical_block_size(ahci_blk->q, 512);
+	// TODO: Fix these to the actual SATA device
+	// i.e. allow 4K devices to be specified.
+	blk_queue_logical_block_size(ahci_blk->q, 512);
+	blk_queue_physical_block_size(ahci_blk->q, 512);
 
 	size = 10 * 1024 * 1024 * 1024ULL;
 	size /= (sector_t) 512;
 	set_capacity(disk, size);
+	
+	mutex_lock(&lock);
+	ahci_blk->index = ahci_minor_index++;
+	ahci_blk->disk = disk;
+	ahci_blk->ap = port;
+	list_add_tail(&(ahci_blk->list), &ahci_blk_list);
+	mutex_unlock(&lock);
 
 	disk->flags |= GENHD_FL_EXT_DEVT;
 	spin_lock_init(&ahci_blk->lock);

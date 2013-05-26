@@ -63,6 +63,7 @@ extern struct ata_link *ata_dev_phys_link(struct ata_device *dev);
 extern void ata_force_cbl(struct ata_port *ap);
 extern u64 ata_tf_to_lba(const struct ata_taskfile *tf);
 extern u64 ata_tf_to_lba48(const struct ata_taskfile *tf);
+extern struct ata_device *ata_find_dev(struct ata_port *ap, int devno);
 extern struct ata_queued_cmd *ata_qc_new_init(struct ata_device *dev);
 extern int ata_build_rw_tf(struct ata_taskfile *tf, struct ata_device *dev,
 			   u64 block, u32 n_block, unsigned int tf_flags,
@@ -159,6 +160,9 @@ extern void ata_blk_media_change_notify(struct ata_device *dev);
 extern void ata_blk_hotplug(struct work_struct *work);
 extern void ata_schedule_blk_eh(struct Scsi_Host *shost);
 extern void ata_blk_dev_rescan(struct work_struct *work);
+
+/* libata-mq.c */
+extern struct ata_queued_cmd *ata_qc_new_init_mq(struct ata_port *ap, int tag);
 
 /* libata-eh.c */
 extern unsigned long ata_internal_cmd_timeout(struct ata_device *dev, u8 cmd);
