@@ -766,51 +766,6 @@ static void ata_qc_set_pc_nbytes(struct ata_queued_cmd *qc)
 }
 
 /**
- *	ata_dump_status - user friendly display of error info
- *	@id: id of the port in question
- *	@tf: ptr to filled out taskfile
- *
- *	Decode and dump the ATA error/status registers for the user so
- *	that they have some idea what really happened at the non
- *	make-believe layer.
- *
- *	LOCKING:
- *	inherited from caller
- */
-static void ata_dump_status(unsigned id, struct ata_taskfile *tf)
-{
-	u8 stat = tf->command, err = tf->feature;
-
-	printk(KERN_WARNING "ata%u: status=0x%02x { ", id, stat);
-	if (stat & ATA_BUSY) {
-		printk("Busy }\n");	/* Data is not valid in this case */
-	} else {
-		if (stat & 0x40)	printk("DriveReady ");
-		if (stat & 0x20)	printk("DeviceFault ");
-		if (stat & 0x10)	printk("SeekComplete ");
-		if (stat & 0x08)	printk("DataRequest ");
-		if (stat & 0x04)	printk("CorrectedError ");
-		if (stat & 0x02)	printk("Index ");
-		if (stat & 0x01)	printk("Error ");
-		printk("}\n");
-
-		if (err) {
-			printk(KERN_WARNING "ata%u: error=0x%02x { ", id, err);
-			if (err & 0x04)		printk("DriveStatusError ");
-			if (err & 0x80) {
-				if (err & 0x04)	printk("BadCRC ");
-				else		printk("Sector ");
-			}
-			if (err & 0x40)		printk("UncorrectableError ");
-			if (err & 0x10)		printk("SectorIdNotFound ");
-			if (err & 0x02)		printk("TrackZeroNotFound ");
-			if (err & 0x01)		printk("AddrMarkNotFound ");
-			printk("}\n");
-		}
-	}
-}
-
-/**
  *	ata_to_sense_error - convert ATA error to SCSI error
  *	@id: ATA device number
  *	@drv_stat: value contained in ATA status register
@@ -827,7 +782,7 @@ static void ata_dump_status(unsigned id, struct ata_taskfile *tf)
  *	LOCKING:
  *	spin_lock_irqsave(host lock)
  */
-static void ata_to_sense_error(unsigned id, u8 drv_stat, u8 drv_err, u8 *sk,
+void ata_to_sense_error(unsigned id, u8 drv_stat, u8 drv_err, u8 *sk,
 			       u8 *asc, u8 *ascq, int verbose)
 {
 	int i;
@@ -3647,7 +3602,7 @@ void ata_scsi_scan_host(struct ata_port *ap, int sync)
 				id = dev->devno;
 			else
 				channel = link->pmp;
-
+			printk("ata_scsi_scan_host: I dont want to live anymore\n");
 			sdev = __scsi_add_device(ap->scsi_host, channel, id, 0,
 						 NULL);
 			if (!IS_ERR(sdev)) {

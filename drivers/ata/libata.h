@@ -150,8 +150,15 @@ extern void ata_scsi_dev_rescan(struct work_struct *work);
 extern int ata_bus_probe(struct ata_port *ap);
 extern int ata_scsi_user_scan(struct Scsi_Host *shost, unsigned int channel,
 			      unsigned int id, unsigned int lun);
+void ata_to_sense_error(unsigned id, u8 drv_stat, u8 drv_err, u8 *sk,
+			       u8 *asc, u8 *ascq, int verbose);
+
 
 /* libata-blk.c */
+extern void ata_blk_qc_prepare(struct ata_queued_cmd *qc);
+extern void ata_blk_qc_complete(struct ata_queued_cmd *qc);
+extern struct request_queue *ata_get_qc_request_queue(struct ata_queued_cmd *qc);
+extern struct request *ata_get_qc_request(struct ata_queued_cmd *qc);
 extern int ata_blk_add_port(struct ata_port *ap);
 extern void ata_blk_remove_port(struct ata_port *ap);
 extern void ata_blk_scan_host(struct ata_port *ap, int sync);
@@ -162,7 +169,7 @@ extern void ata_schedule_blk_eh(struct Scsi_Host *shost);
 extern void ata_blk_dev_rescan(struct work_struct *work);
 
 /* libata-mq.c */
-extern struct ata_queued_cmd *ata_qc_new_init_mq(struct ata_port *ap, int tag);
+extern struct ata_queued_cmd *ata_mq_qc_init(struct ata_port *ap, int tag);
 
 /* libata-eh.c */
 extern unsigned long ata_internal_cmd_timeout(struct ata_device *dev, u8 cmd);
@@ -183,6 +190,7 @@ extern unsigned int ata_read_log_page(struct ata_device *dev, u8 log,
 				      u8 page, void *buf, unsigned int sectors);
 extern void ata_eh_autopsy(struct ata_port *ap);
 const char *ata_get_cmd_descript(u8 command);
+extern void ata_dump_status(unsigned id, struct ata_taskfile *tf);
 extern void ata_eh_report(struct ata_port *ap);
 extern int ata_eh_reset(struct ata_link *link, int classify,
 			ata_prereset_fn_t prereset, ata_reset_fn_t softreset,

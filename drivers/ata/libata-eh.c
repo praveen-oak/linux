@@ -967,7 +967,8 @@ static void ata_eh_set_pending(struct ata_port *ap, int fastdrain)
 void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
-	struct request_queue *q = qc->scsicmd->device->request_queue;
+	struct request_queue *q = ata_get_qc_request_queue(qc);
+	struct request *rq = ata_get_qc_request(qc);
 	unsigned long flags;
 
 	WARN_ON(!ap->ops->error_handler);
@@ -980,9 +981,14 @@ void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 	 * Note that ATA_QCFLAG_FAILED is unconditionally set after
 	 * this function completes.
 	 */
-	spin_lock_irqsave(q->queue_lock, flags);
-	blk_abort_request(qc->scsicmd->request);
-	spin_unlock_irqrestore(q->queue_lock, flags);
+//	spin_lock_irqsave(q->queue_lock, flags);
+	// Eh... how to we tell mq to remove the request?
+	// ah... we reschedule it to try, and let mq handle it taking
+	// it off.... for now.. lets just continue to get it actually
+	// working...
+	printk("libata-eh.c Command should have been aborted...\n");
+	//blk_abort_request(rq);
+//	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
 /**
@@ -1046,7 +1052,11 @@ void ata_port_schedule_eh(struct ata_port *ap)
 static int ata_do_link_abort(struct ata_port *ap, struct ata_link *link)
 {
 	int tag, nr_aborted = 0;
-
+	
+	printk("Entering ata_do_link_abort\n");
+	WARN_ON(1);
+	printk("pointer: %p", ap);
+	printk("pointer2: %p", ap->ops);
 	WARN_ON(!ap->ops->error_handler);
 
 	/* we're gonna abort all commands, no need for fast drain */
@@ -1128,9 +1138,6 @@ static void __ata_port_freeze(struct ata_port *ap)
 		ap->ops->freeze(ap);
 
 	ap->pflags |= ATA_PFLAG_FROZEN;
-
-	WARN_ON(1);
-	printk("I was frooooooooooooooozen\n");
 
 	DPRINTK("ata%u port frozen\n", ap->print_id);
 }
@@ -3990,6 +3997,51 @@ void ata_do_eh(struct ata_port *ap, ata_prereset_fn_t prereset,
 	}
 
 	ata_eh_finish(ap);
+}
+
+/**
+ *	ata_dump_status - user friendly display of error info
+ *	@id: id of the port in question
+ *	@tf: ptr to filled out taskfile
+ *
+ *	Decode and dump the ATA error/status registers for the user so
+ *	that they have some idea what really happened at the non
+ *	make-believe layer.
+ *
+ *	LOCKING:
+ *	inherited from caller
+ */
+void ata_dump_status(unsigned id, struct ata_taskfile *tf)
+{
+	u8 stat = tf->command, err = tf->feature;
+
+	printk(KERN_WARNING "ata%u: status=0x%02x { ", id, stat);
+	if (stat & ATA_BUSY) {
+		printk("Busy }\n");	/* Data is not valid in this case */
+	} else {
+		if (stat & 0x40)	printk("DriveReady ");
+		if (stat & 0x20)	printk("DeviceFault ");
+		if (stat & 0x10)	printk("SeekComplete ");
+		if (stat & 0x08)	printk("DataRequest ");
+		if (stat & 0x04)	printk("CorrectedError ");
+		if (stat & 0x02)	printk("Index ");
+		if (stat & 0x01)	printk("Error ");
+		printk("}\n");
+
+		if (err) {
+			printk(KERN_WARNING "ata%u: error=0x%02x { ", id, err);
+			if (err & 0x04)		printk("DriveStatusError ");
+			if (err & 0x80) {
+				if (err & 0x04)	printk("BadCRC ");
+				else		printk("Sector ");
+			}
+			if (err & 0x40)		printk("UncorrectableError ");
+			if (err & 0x10)		printk("SectorIdNotFound ");
+			if (err & 0x02)		printk("TrackZeroNotFound ");
+			if (err & 0x01)		printk("AddrMarkNotFound ");
+			printk("}\n");
+		}
+	}
 }
 
 /**

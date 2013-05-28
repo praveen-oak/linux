@@ -41,7 +41,9 @@
 #include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/device.h>
+
 #include <linux/blk-mq.h>
+
 #include "ahci.h"
 #include "../../ata/libata.h"
 
@@ -49,6 +51,8 @@ static LIST_HEAD(ahci_blk_list);
 static DEFINE_MUTEX(lock);
 static int ahci_major;
 static int ahci_minor_index;
+
+static struct ata_host *ahci_ata_host;
 
 static int ahci_skip_host_reset;
 int ahci_ignore_sss;
@@ -1518,12 +1522,14 @@ static void ahci_qc_prep(struct ata_queued_cmd *qc)
 	u32 opts;
 	const u32 cmd_fis_len = 5; /* five dwords */
 	unsigned int n_elem;
-
+	
 	/*
 	 * Fill in command table information.  First, the header,
 	 * a SATA Register - Host to Device command FIS.
 	 */
 	cmd_tbl = pp->cmd_tbl + qc->tag * AHCI_CMD_TBL_SZ;
+
+	printk("flags: %lu protocol: %u ctl: %u", qc->tf.flags, qc->tf.protocol, qc->tf.ctl);
 
 	ata_tf_to_fis(&qc->tf, qc->dev->link->pmp, 1, cmd_tbl);
 	if (is_atapi) {
@@ -1674,6 +1680,7 @@ static void ahci_error_intr(struct ata_port *ap, u32 irq_stat)
 
 	/* okay, let's hand over to EH */
 
+	printk("ahci_error_intr: some mistake happened.\n");
 	if (irq_stat & PORT_IRQ_FREEZE)
 		ata_port_freeze(ap);
 	else if (fbs_need_dec) {
@@ -1704,6 +1711,8 @@ static void ahci_handle_port_interrupt(struct ata_port *ap,
 	}
 
 	if (unlikely(status & PORT_IRQ_ERROR)) {
+		printk("ahci_handle_port_interrupt: woooooooooho PORT IRQ ERROR\n");
+		WARN_ON(1);
 		ahci_error_intr(ap, status);
 		return;
 	}
@@ -1757,7 +1766,7 @@ static void ahci_handle_port_interrupt(struct ata_port *ap,
 			qc_active = readl(port_mmio + PORT_CMD_ISSUE);
 	}
 
-
+	printk("ata_qc_complete_multiple from ahci_handle_port_interrupt\n");
 	rc = ata_qc_complete_multiple(ap, qc_active);
 
 	/* while resetting, invalid completions are expected */
@@ -1955,7 +1964,7 @@ static unsigned int ahci_qc_issue(struct ata_queued_cmd *qc)
 
 	writel(1 << qc->tag, port_mmio + PORT_CMD_ISSUE);
 
-	ahci_sw_activity(qc->dev->link);
+	//ahci_sw_activity(qc->dev->link);
 
 	return 0;
 }
@@ -2259,7 +2268,6 @@ static int ahci_port_start(struct ata_port *ap)
 	dma_addr_t mem_dma;
 	size_t dma_sz, rx_fis_sz;
 
-	printk("retardoooooooooooooooooo\n");
 	pp = devm_kzalloc(dev, sizeof(*pp), GFP_KERNEL);
 	if (!pp)
 		return -ENOMEM;
@@ -2334,6 +2342,7 @@ static int ahci_port_start(struct ata_port *ap)
 
 	ap->private_data = pp;
 
+	printk("initialized ap->private_data %p\n", ap->private_data);
 	/* engage engines, captain */
 	return ahci_port_resume(ap);
 }
@@ -2349,31 +2358,88 @@ static void ahci_port_stop(struct ata_port *ap)
 		ata_port_warn(ap, "%s (%d)\n", emsg, rc);
 }
 
-static int ahci_submit_request(struct request_queue *q, struct request *rq)
+static void ahci_done_fn(struct ata_queued_cmd *qc)
 {
+	int err = 0;;
+	printk("Finishing up my work (intr)\n");
+
+	if (qc->err_mask)
+	{
+		err = qc->err_mask;
+		printk("AHCI-mq error occured. %i", err);
+	}
+
+	blk_mq_end_io(qc->request, err);
+}
+
+static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
+{
+	struct request_queue *q = hctx->queue;
 	struct ahci_blk *p = q->queuedata;
 	struct ata_port *ap = p->ap;
+	struct ata_device *dev = ap->dev;
 	struct ata_queued_cmd *qc = NULL;
+	int rc;
+	int dma_dir = rq_data_dir(rq) == READ ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
+	u64 start = blk_rq_pos(rq);
+	unsigned int nsect = blk_rq_sectors(rq);
+	unsigned int tf_flags = 0;
+
+	printk("AP->DEV->LINK: %p\n", &dev->link);
 	
+
+	// FIXME: Trim 
+	if (rq->cmd_flags & REQ_DISCARD) {
+		int err = 0;
+
+		//err = ahci_send_trim(dd, blk_rq_pos(rq), blk_rq_sectors(rq));
+		blk_mq_end_io(rq, err);
+		return 0;
+	}
+
+	qc = ata_mq_qc_init(ap, rq->tag);
+
+	// Setup DMA gatter/setter dma_map_sg
+	qc->dma_dir = dma_dir;
+	//qc->nsect = nsect;
+
+	qc->dev = dev;
+	qc->ap = ap;
+	/* Create the scatter list for this request. */
+	qc->n_elem = blk_rq_map_sg(hctx->queue, rq, &qc->sg);
+	
+
 	// Create qc (ata_queued_cmd) 
 	// issue qc
 	// retrieve the completion
 
-	printk("Gone fishing for tags %p\n", ap);
-	qc = ata_qc_new_init_mq(ap, rq->tag);
-	
-	printk("Got tag\n");
+	// Set up ata task file...
+	qc->flags |= ATA_QCFLAG_IO;
+	qc->nbytes = nsect * 512;
+
+	rc = ata_build_rw_tf(&qc->tf, qc->dev, start, nsect, tf_flags, 
+			qc->tag);
+
+	qc->complete_fn = ata_blk_qc_complete;
+	qc->done_fn = ahci_done_fn;
+
+	qc->request = rq;
+	qc->request_queue = q;
+
 	ata_qc_issue(qc);
 	
-	pr_err("Retrieved a request that I won't answer anything %i;p\n", p->index);
+	pr_err("Issued request\n", p->index);
 	return 0;
 }
 
 static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	int ret;
+	unsigned int flags;
 
-	ret = ahci_submit_request(hctx->queue, rq);
+	spin_lock_irqsave(&ahci_ata_host->lock, flags);
+	ret = ahci_submit_request(hctx, rq);
+	spin_unlock_irqrestore(&ahci_ata_host->lock, flags);
 	if (!ret)
 		return BLK_MQ_RQ_QUEUE_OK;
 
@@ -2383,7 +2449,7 @@ static int ahci_queue_rq(struct blk_mq_hw_ctx *hctx, struct request *rq)
 
 static struct blk_mq_ops ahci_mq_ops = {
 		.queue_rq		= ahci_queue_rq,
-		.map_queue		= blk_mq_map_single_queue,
+		.map_queue		= blk_mq_map_queue,
 		.alloc_hctx		= blk_mq_alloc_single_hw_queue,
 		.free_hctx		= blk_mq_free_single_hw_queue,
 };
@@ -2391,9 +2457,33 @@ static struct blk_mq_ops ahci_mq_ops = {
 static struct blk_mq_reg ahci_mq_reg = {
 		.ops			= &ahci_mq_ops,
 		.nr_hw_queues	= 1,
-		.queue_depth	= 32, 
+		.queue_depth	= 16, //FIXME set queue depth to ATA_MAX_CMDS
+		.reserved_tags	= 1,
+		.cmd_size		= sizeof(struct ata_queued_cmd),
 		.numa_node		= NUMA_NO_NODE,
+		.flags			= BLK_MQ_F_SHOULD_MERGE,
 };
+
+static void ahci_init_cmd(void *data, struct blk_mq_hw_ctx *hctx,
+			  struct request *rq, unsigned int i)
+{
+	struct ata_port *ap = rq->special;
+	struct ata_queued_cmd *qc;
+	// FIXME: Insert ATA sg constant instead
+	// Check to see if it has been allocated.
+	// Or.. unpoint it.
+	printk("Initializin tag %u\n", i);
+	qc = ata_mq_qc_init(ap, i);
+	
+	// FIXME: sg static to omit chance of null.
+	if (qc == NULL)
+		printk("qc not initialized.\n");
+
+	qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, NUMA_NO_NODE);
+	sg_init_table(qc->sg, ATA_MAX_QUEUE);
+
+	printk("ahci_init_cmd: called\n");
+}
 
 static int ahci_blk_open(struct block_device *bdev, fmode_t mode)
 {
@@ -2424,6 +2514,8 @@ static int ahci_host_register(struct ata_host *host)
 
 	ahci_major = err;
 
+	ahci_ata_host = host;
+
 	return 0;
 }
 
@@ -2449,7 +2541,7 @@ static int ahci_port_register(struct ata_port *port)
 
 	memset(ahci_blk, 0, sizeof(*ahci_blk));
 
-	ahci_blk->q = blk_mq_init_queue(&ahci_mq_reg);
+	ahci_blk->q = blk_mq_init_queue(&ahci_mq_reg, ahci_blk);
 
 	if (!ahci_blk->q) {
 		kfree(ahci_blk);
@@ -2475,6 +2567,7 @@ static int ahci_port_register(struct ata_port *port)
 	set_capacity(disk, size);
 	
 	mutex_lock(&lock);
+	printk("Initializing ahci_minor_index: %i\n", ahci_minor_index);
 	ahci_blk->index = ahci_minor_index++;
 	ahci_blk->disk = disk;
 	ahci_blk->ap = port;
@@ -2489,6 +2582,10 @@ static int ahci_port_register(struct ata_port *port)
 	disk->private_data	= ahci_blk;
 	disk->queue		= ahci_blk->q;
 	sprintf(disk->disk_name, "ahci%d", ahci_blk->index);
+
+	blk_mq_init_commands(ahci_blk->q, ahci_init_cmd, port);
+
+	printk("disk->fops %p\n", &disk->fops);
 	add_disk(disk);
 
 	return 0;

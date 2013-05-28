@@ -39,7 +39,7 @@
  *	http://www.ce-ata.org (CE-ATA: not supported)
  *
  */
-
+#define ATA_VERBOSE_DEBUG 1
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -71,7 +71,10 @@
 
 #include "libata.h"
 #include "libata-transport.h"
+ 
 
+#define ATA_VERBOSE_DEBUG
+#define ATA_DEBUG
 /* debounce timing parameters in msecs { interval, duration, timeout } */
 const unsigned long sata_deb_timing_normal[]		= {   5,  100, 2000 };
 const unsigned long sata_deb_timing_hotplug[]		= {  25,  500, 2000 };
@@ -751,8 +754,10 @@ int ata_build_rw_tf(struct ata_taskfile *tf, struct ata_device *dev,
 	tf->flags |= ATA_TFLAG_ISADDR | ATA_TFLAG_DEVICE;
 	tf->flags |= tf_flags;
 
+	printk("NCQ or?\n");
 	if (ata_ncq_enabled(dev) && likely(tag != ATA_TAG_INTERNAL)) {
 		/* yay, NCQ */
+		printk("NCQ enabled\n");
 		if (!lba_48_ok(block, n_block))
 			return -ERANGE;
 
@@ -774,7 +779,7 @@ int ata_build_rw_tf(struct ata_taskfile *tf, struct ata_device *dev,
 		tf->lbah = (block >> 16) & 0xff;
 		tf->lbam = (block >> 8) & 0xff;
 		tf->lbal = block & 0xff;
-
+		printk("Setting some flags\n");
 		tf->device = ATA_LBA;
 		if (tf->flags & ATA_TFLAG_FUA)
 			tf->device |= 1 << 7;
@@ -2162,6 +2167,7 @@ int ata_dev_configure(struct ata_device *dev)
 	char modelbuf[ATA_ID_PROD_LEN+1];
 	int rc;
 
+	printk("ata_dev_configure: I'm your father\n");
 	if (!ata_dev_enabled(dev) && ata_msg_info(ap)) {
 		ata_dev_info(dev, "%s: ENTER/EXIT -- nodev\n", __func__);
 		return 0;
@@ -5072,6 +5078,7 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 	struct ata_link *link = qc->dev->link;
 	u8 prot = qc->tf.protocol;
 
+	printk("qc->dev->link %p\n", qc->dev->link);
 	/* Make sure only one non-NCQ command is outstanding.  The
 	 * check is skipped for old EH because it reuses active qc to
 	 * request ATAPI sense.
@@ -5102,22 +5109,27 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 			 (!qc->sg || !qc->n_elem || !qc->nbytes)))
 		goto sys_err;
 
-	if (ata_is_dma(prot) || (ata_is_pio(prot) &&
+/*	if (ata_is_dma(prot) || (ata_is_pio(prot) &&
 				 (ap->flags & ATA_FLAG_PIO_DMA)))
 		if (ata_sg_setup(qc))
 			goto sys_err;
-
+			*/
+	printk("4\n");
 	/* if device is sleeping, schedule reset and abort the link */
 	if (unlikely(qc->dev->flags & ATA_DFLAG_SLEEPING)) {
+		printk("larlar\n");
 		link->eh_info.action |= ATA_EH_RESET;
 		ata_ehi_push_desc(&link->eh_info, "waking up from sleep");
+		printk("larlar1\n");
 		ata_link_abort(link);
+		printk("larlar2\n");
 		return;
 	}
 
 	ap->ops->qc_prep(qc);
-
+	printk("ap->ops->qc_prep executed ap->private_data: %p\n", ap->private_data);
 	qc->err_mask |= ap->ops->qc_issue(qc);
+	printk("ap->ops->qc_issue executed\n");
 	if (unlikely(qc->err_mask))
 		goto err;
 	return;
@@ -5607,6 +5619,7 @@ void ata_link_init(struct ata_port *ap, struct ata_link *link, int pmp)
 	memset((void *)link + ATA_LINK_CLEAR_BEGIN, 0,
 	       ATA_LINK_CLEAR_END - ATA_LINK_CLEAR_BEGIN);
 
+	printk("Storing link %p into ap %p\n", link, ap);
 	link->ap = ap;
 	link->pmp = pmp;
 	link->active_tag = ATA_TAG_POISON;
@@ -5673,7 +5686,7 @@ int sata_link_init_spd(struct ata_link *link)
 struct ata_port *ata_port_alloc(struct ata_host *host)
 {
 	struct ata_port *ap;
-
+	printk("ata_port_alloc: i was here\n");
 	DPRINTK("ENTER\n");
 
 	ap = kzalloc(sizeof(*ap), GFP_KERNEL);
@@ -6046,7 +6059,7 @@ int ata_host_start(struct ata_host *host)
 				goto err_out;
 			}
 		}
-		//ata_eh_freeze_port(ap);
+		ata_eh_freeze_port(ap);
 	}
 
 	if (start_dr)
@@ -6120,6 +6133,7 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 {
 	struct ata_port *ap = data;
 
+	printk("async_port_probe---------------\n");
 	/*
 	 * If we're not allowed to scan this host in parallel,
 	 * we need to wait until all previous scans have completed
@@ -6907,6 +6921,8 @@ int ata_dev_printk(const struct ata_device *dev, const char *level,
 
 	vaf.fmt = fmt;
 	vaf.va = &args;
+
+	printk("Using link %p with port %p\n", dev->link, dev->link->ap);
 
 	r = printk("%sata%u.%02u: %pV",
 		   level, dev->link->ap->print_id, dev->link->pmp + dev->devno,

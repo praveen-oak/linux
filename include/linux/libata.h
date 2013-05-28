@@ -559,6 +559,9 @@ struct ata_queued_cmd {
 	struct ata_port		*ap;
 	struct ata_device	*dev;
 
+	/* Either implement atadone or scsidone. Not both. */
+	void			(*done_fn)(struct ata_queued_cmd *);
+
 	struct scsi_cmnd	*scsicmd;
 	void			(*scsidone)(struct scsi_cmnd *);
 
@@ -591,6 +594,19 @@ struct ata_queued_cmd {
 
 	void			*private_data;
 	void			*lldd_task;
+
+	/* ata-blk specific */
+	int result;
+	struct request *request;
+	struct request_queue *request_queue;
+
+	// TODO: Needed?
+#define ATA_SENSE_BUFFERSIZE	96
+	unsigned char sense_buffer[ATA_SENSE_BUFFERSIZE];
+				/* obtained by REQUEST SENSE when
+				 * CHECK CONDITION is received on original
+				 * command (auto-sense) */
+	
 };
 
 struct ata_port_stats {
@@ -1551,10 +1567,9 @@ static inline void ata_tf_init(struct ata_device *dev, struct ata_taskfile *tf)
 		tf->device = ATA_DEVICE_OBS | ATA_DEV1;
 }
 
-static inline void ata_qc_reinit(struct ata_queued_cmd *qc)
+static inline void __ata_qc_reinit(struct ata_queued_cmd *qc)
 {
 	qc->dma_dir = DMA_NONE;
-	qc->sg = NULL;
 	qc->flags = 0;
 	qc->cursg = NULL;
 	qc->cursg_ofs = 0;
@@ -1562,6 +1577,14 @@ static inline void ata_qc_reinit(struct ata_queued_cmd *qc)
 	qc->n_elem = 0;
 	qc->err_mask = 0;
 	qc->sect_size = ATA_SECT_SIZE;
+}
+
+
+static inline void ata_qc_reinit(struct ata_queued_cmd *qc)
+{
+	__ata_qc_reinit(qc);
+
+	qc->sg = NULL;
 
 	ata_tf_init(qc->dev, &qc->tf);
 
