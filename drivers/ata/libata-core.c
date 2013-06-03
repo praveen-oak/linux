@@ -39,7 +39,6 @@
  *	http://www.ce-ata.org (CE-ATA: not supported)
  *
  */
-#define ATA_VERBOSE_DEBUG 1
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/pci.h>
@@ -2562,6 +2561,7 @@ int ata_bus_probe(struct ata_port *ap)
 	int tries[ATA_MAX_DEVICES];
 	int rc;
 	struct ata_device *dev;
+	printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM\n");
 
 	ata_for_each_dev(dev, &ap->link, ALL)
 		tries[dev->devno] = ATA_PROBE_MAX_TRIES;
@@ -5109,6 +5109,7 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 			 (!qc->sg || !qc->n_elem || !qc->nbytes)))
 		goto sys_err;
 
+	// FIXME: Already been set up in AHCI driver. (but not for others)
 /*	if (ata_is_dma(prot) || (ata_is_pio(prot) &&
 				 (ap->flags & ATA_FLAG_PIO_DMA)))
 		if (ata_sg_setup(qc))
@@ -6118,9 +6119,13 @@ int ata_port_probe(struct ata_port *ap)
 	int rc = 0;
 
 	if (ap->ops->error_handler) {
+		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM1a\n");
 		__ata_port_probe(ap);
+		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM3\n");
 		ata_port_wait_eh(ap);
+		
 	} else {
+		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM2\n");
 		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
 		rc = ata_bus_probe(ap);
 		DPRINTK("ata%u: bus probe end\n", ap->print_id);
@@ -6133,7 +6138,7 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 {
 	struct ata_port *ap = data;
 
-	printk("async_port_probe---------------\n");
+	printk("async_port_probe2\n");
 	/*
 	 * If we're not allowed to scan this host in parallel,
 	 * we need to wait until all previous scans have completed
@@ -6145,33 +6150,37 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 		async_synchronize_cookie(cookie);
 
 	(void)ata_port_probe(ap);
+	printk("async_port_probe3--------------\n");
 
 	/* in order to keep device order, we need to synchronize at this point */
 	async_synchronize_cookie(cookie);
 
 	ata_scsi_scan_host(ap, 1);
+	printk("async_port_probe4---------------\n");
+
 }
 
 static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 {
 	int i, rc;
-
+	
 	if (host->ops->blk_host_register) {
 		rc = host->ops->blk_host_register(host);
 
 		if (rc)
 			goto err_reg;
 	}
+	printk("ata_add_hosts: Boom\n");
+
+	rc = 0;
 
 	for (i = 0; i< host->n_ports;i++) {
 		struct ata_port *ap = host->ports[i];
 
-		rc = -ENOMEM;
+		if (!ap->ops->blk_port_register)
+			continue;
 
-		if (ap->ops->blk_port_register)
-			rc = ap->ops->blk_port_register(ap);
-		else
-			rc = ata_scsi_add_port(ap, sht);
+		rc = ata_scsi_add_port(ap, sht);
 
 		if (rc)
 			goto err_alloc;
@@ -6180,6 +6189,8 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 	return rc;
 
 err_alloc:
+	printk("ata_add_hosts: Boom2\n");
+
 	while (--i >= 0) {
 		struct ata_port *ap = host->ports[i];
 
@@ -6211,7 +6222,7 @@ err_reg:
 int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 {
 	int i, rc;
-
+	
 	/* host must have been started */
 	if (!(host->flags & ATA_HOST_STARTED)) {
 		dev_err(host->dev, "BUG: trying to register unstarted host\n");
@@ -6229,7 +6240,6 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 	/* give ports names and add SCSI hosts */
 	for (i = 0; i < host->n_ports; i++)
 		host->ports[i]->print_id = atomic_inc_return(&ata_print_id);
-
 
 	/* Create associated sysfs transport objects  */
 	for (i = 0; i < host->n_ports; i++) {
@@ -6275,6 +6285,12 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
 		async_schedule(async_port_probe, ap);
+	}
+
+	/* if implemented, register device in block layer */
+	for (i = 0; i < host->n_ports; i++) {
+		struct ata_port *ap = host->ports[i];
+		ap->ops->blk_port_register(ap);
 	}
 
 	return 0;

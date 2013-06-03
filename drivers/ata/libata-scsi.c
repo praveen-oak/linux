@@ -3589,6 +3589,7 @@ void ata_scsi_scan_host(struct ata_port *ap, int sync)
 	struct ata_link *link;
 	struct ata_device *dev;
 
+	printk("larlarlarlarlarlarlrla\n");
  repeat:
 	ata_for_each_link(link, ap, EDGE) {
 		ata_for_each_dev(dev, link, ENABLED) {
@@ -3602,7 +3603,7 @@ void ata_scsi_scan_host(struct ata_port *ap, int sync)
 				id = dev->devno;
 			else
 				channel = link->pmp;
-			printk("ata_scsi_scan_host: I dont want to live anymore\n");
+
 			sdev = __scsi_add_device(ap->scsi_host, channel, id, 0,
 						 NULL);
 			if (!IS_ERR(sdev)) {

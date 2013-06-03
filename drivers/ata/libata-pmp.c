@@ -1091,6 +1091,7 @@ static int sata_pmp_eh_recover(struct ata_port *ap)
  */
 void sata_pmp_error_handler(struct ata_port *ap)
 {
+	printk("sata_pmp_error_handler: Let's work this out\n");
 	ata_eh_autopsy(ap);
 	ata_eh_report(ap);
 	sata_pmp_eh_recover(ap);

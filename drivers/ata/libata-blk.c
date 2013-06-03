@@ -90,6 +90,10 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 	u8 *cdb = qc->cdb;
 	int need_sense = (qc->err_mask != 0);
 
+	printk("Completion of tf:\n");
+	ata_dump_status(1, &qc->tf);
+	printk("Result tf:\n");
+	ata_dump_status(1, &qc->result_tf);
 	/* For ATA pass thru (SAT) commands, generate a sense block if
 	 * user mandated it or if there's an error.  Note that if we
 	 * generate because the user forced us to [CK_COND =1], a check
@@ -124,44 +128,3 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 	ata_qc_free(qc);
 }
 
-int ata_blk_add_port(struct ata_port *ap)
-{
-	int err;
-
-	return 0;
-}
-
-void ata_blk_remove_port(struct ata_port *ap)
-{
-
-}
-
-void ata_blk_scan_host(struct ata_port *ap, int sync)
-{
-
-}
-
-int ata_blk_offline_dev(struct ata_device *dev)
-{
-	return 0;
-}
-
-void ata_blk_media_change_notify(struct ata_device *dev)
-{
-
-}
-
-void ata_blk_hotplug(struct work_struct *work)
-{
-
-}
-
-void ata_schedule_blk_eh(struct Scsi_Host *shost)
-{
-
-}
-
-void ata_blk_dev_rescan(struct work_struct *work)
-{
-
-}

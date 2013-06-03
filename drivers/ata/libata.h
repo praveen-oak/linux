@@ -159,14 +159,6 @@ extern void ata_blk_qc_prepare(struct ata_queued_cmd *qc);
 extern void ata_blk_qc_complete(struct ata_queued_cmd *qc);
 extern struct request_queue *ata_get_qc_request_queue(struct ata_queued_cmd *qc);
 extern struct request *ata_get_qc_request(struct ata_queued_cmd *qc);
-extern int ata_blk_add_port(struct ata_port *ap);
-extern void ata_blk_remove_port(struct ata_port *ap);
-extern void ata_blk_scan_host(struct ata_port *ap, int sync);
-extern int ata_blk_offline_dev(struct ata_device *dev);
-extern void ata_blk_media_change_notify(struct ata_device *dev);
-extern void ata_blk_hotplug(struct work_struct *work);
-extern void ata_schedule_blk_eh(struct Scsi_Host *shost);
-extern void ata_blk_dev_rescan(struct work_struct *work);
 
 /* libata-mq.c */
 extern struct ata_queued_cmd *ata_mq_qc_init(struct ata_port *ap, int tag);

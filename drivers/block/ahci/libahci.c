@@ -189,7 +189,7 @@ struct ata_port_operations ahci_ops = {
 	.pmp_attach		= ahci_pmp_attach,
 	.pmp_detach		= ahci_pmp_detach,
 
-	.set_lpm		= ahci_set_lpm,
+//	.set_lpm		= ahci_set_lpm,
 	.em_show		= ahci_led_show,
 	.em_store		= ahci_led_store,
 	.sw_activity_show	= ahci_activity_show,
@@ -735,15 +735,15 @@ static int ahci_set_lpm(struct ata_link *link, enum ata_lpm_policy policy,
 		}
 	}
 
-//	/* set aggressive device sleep */
-//	if ((hpriv->cap2 & HOST_CAP2_SDS) &&
-//	    (hpriv->cap2 & HOST_CAP2_SADM) &&
-//	    (link->device->flags & ATA_DFLAG_DEVSLP)) {
-//		if (policy == ATA_LPM_MIN_POWER)
-//			ahci_set_aggressive_devslp(ap, true);
-//		else
-//			ahci_set_aggressive_devslp(ap, false);
-//	}
+	/* set aggressive device sleep */
+	if ((hpriv->cap2 & HOST_CAP2_SDS) &&
+	    (hpriv->cap2 & HOST_CAP2_SADM) &&
+	    (link->device->flags & ATA_DFLAG_DEVSLP)) {
+		if (policy == ATA_LPM_MIN_POWER)
+			ahci_set_aggressive_devslp(ap, true);
+		else
+			ahci_set_aggressive_devslp(ap, false);
+	}
 
 	if (policy == ATA_LPM_MAX_POWER) {
 		sata_link_scr_lpm(link, policy, false);
@@ -2420,6 +2420,9 @@ static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 	rc = ata_build_rw_tf(&qc->tf, qc->dev, start, nsect, tf_flags, 
 			qc->tag);
 
+	// FIXME: Remove dump
+	//ata_dump_status(1, &qc->tf);
+
 	qc->complete_fn = ata_blk_qc_complete;
 	qc->done_fn = ahci_done_fn;
 
@@ -2472,7 +2475,6 @@ static void ahci_init_cmd(void *data, struct blk_mq_hw_ctx *hctx,
 	// FIXME: Insert ATA sg constant instead
 	// Check to see if it has been allocated.
 	// Or.. unpoint it.
-	printk("Initializin tag %u\n", i);
 	qc = ata_mq_qc_init(ap, i);
 	
 	// FIXME: sg static to omit chance of null.
@@ -2481,8 +2483,6 @@ static void ahci_init_cmd(void *data, struct blk_mq_hw_ctx *hctx,
 
 	qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, NUMA_NO_NODE);
 	sg_init_table(qc->sg, ATA_MAX_QUEUE);
-
-	printk("ahci_init_cmd: called\n");
 }
 
 static int ahci_blk_open(struct block_device *bdev, fmode_t mode)

@@ -845,7 +845,9 @@ void ata_port_wait_eh(struct ata_port *ap)
 	DEFINE_WAIT(wait);
 
  retry:
+	printk("take lock\n");
 	spin_lock_irqsave(ap->lock, flags);
+	printk("given lock\n");
 
 	while (ap->pflags & (ATA_PFLAG_EH_PENDING | ATA_PFLAG_EH_IN_PROGRESS)) {
 		prepare_to_wait(&ap->eh_wait_q, &wait, TASK_UNINTERRUPTIBLE);
@@ -857,11 +859,12 @@ void ata_port_wait_eh(struct ata_port *ap)
 
 	spin_unlock_irqrestore(ap->lock, flags);
 
+	printk("finished waiting\n");
 	/* make sure SCSI EH is complete */
-	if (scsi_host_in_recovery(ap->scsi_host)) {
-		ata_msleep(ap, 10);
-		goto retry;
-	}
+//	if (scsi_host_in_recovery(ap->scsi_host)) {
+//		ata_msleep(ap, 10);
+//		goto retry;
+//	}
 }
 EXPORT_SYMBOL_GPL(ata_port_wait_eh);
 
@@ -1006,8 +1009,8 @@ void ata_std_sched_eh(struct ata_port *ap)
 		return;
 
 	ata_eh_set_pending(ap, 1);
-	scsi_schedule_eh(ap->scsi_host);
-
+	//scsi_schedule_eh(ap->scsi_host);
+	printk("ata_std_sched_eh\n");
 	DPRINTK("port EH scheduled\n");
 }
 EXPORT_SYMBOL_GPL(ata_std_sched_eh);
