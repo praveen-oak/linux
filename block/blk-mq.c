@@ -12,6 +12,7 @@
 #include <linux/cpu.h>
 #include <linux/cache.h>
 #include <linux/sched/sysctl.h>
+#include <linux/delay.h>
 
 #include <trace/events/block.h>
 
@@ -87,6 +88,78 @@ static struct request *blk_mq_alloc_rq(struct blk_mq_hw_ctx *hctx, gfp_t gfp,
 	return NULL;
 }
 
+static int blk_mq_queue_enter(struct request_queue *q)
+{
+	int ret;
+
+	__percpu_counter_add(&q->mq_usage_counter, 1, 100000);
+	smp_wmb();
+	if (!blk_queue_bypass(q))
+		return 0;
+
+	__percpu_counter_add(&q->mq_usage_counter, -1, 100000);
+
+	spin_lock_irq(q->queue_lock);
+	ret = wait_event_interruptible_lock_irq(q->mq_freeze_wq,
+		!blk_queue_bypass(q), *q->queue_lock);
+	/* inc usage with lock hold to avoid freeze_queue runs here */
+	if (!ret)
+		__percpu_counter_add(&q->mq_usage_counter, 1, 100000);
+	spin_unlock_irq(q->queue_lock);
+
+	return ret;
+}
+
+static void blk_mq_queue_exit(struct request_queue *q)
+{
+	__percpu_counter_add(&q->mq_usage_counter, -1, 100000);
+}
+
+/*
+ * Guarantee no request is in use, so we can change any data structure of
+ * the queue afterward.
+ */
+void blk_mq_freeze_queue(struct request_queue *q)
+{
+	bool drain;
+
+	spin_lock_irq(q->queue_lock);
+	drain = !q->bypass_depth++;
+	queue_flag_set(QUEUE_FLAG_BYPASS, q);
+	spin_unlock_irq(q->queue_lock);
+
+	if (!drain)
+		return;
+
+	while (true) {
+		s64 count;
+
+		spin_lock_irq(q->queue_lock);
+		count = percpu_counter_sum(&q->mq_usage_counter);
+		spin_unlock_irq(q->queue_lock);
+
+		if (count == 0)
+			break;
+		blk_mq_run_queues(q, false);
+		msleep(10);
+	}
+}
+
+void blk_mq_unfreeze_queue(struct request_queue *q)
+{
+	bool wake = false;
+
+	spin_lock_irq(q->queue_lock);
+	if (!--q->bypass_depth) {
+		queue_flag_clear(QUEUE_FLAG_BYPASS, q);
+		wake = true;
+	}
+	WARN_ON_ONCE(q->bypass_depth < 0);
+	spin_unlock_irq(q->queue_lock);
+	if (wake)
+		wake_up_all(&q->mq_freeze_wq);
+}
+
 bool blk_mq_can_queue(struct blk_mq_hw_ctx *hctx)
 {
 	return blk_mq_has_free_tags(hctx->tags);
@@ -136,6 +209,9 @@ struct request *blk_mq_alloc_request(struct request_queue *q, int rw, gfp_t gfp)
 {
 	struct request *rq;
 
+	if (blk_mq_queue_enter(q))
+		return NULL;
+
 	rq = blk_mq_alloc_request_pinned(q, rw, gfp, false);
 	blk_mq_put_ctx(rq->mq_ctx);
 	return rq;
@@ -145,6 +221,9 @@ struct request *blk_mq_alloc_reserved_request(struct request_queue *q, int rw,
 					      gfp_t gfp)
 {
 	struct request *rq;
+
+	if (blk_mq_queue_enter(q))
+		return NULL;
 
 	rq = blk_mq_alloc_request_pinned(q, rw, gfp, true);
 	blk_mq_put_ctx(rq->mq_ctx);
@@ -170,6 +249,8 @@ static void __blk_mq_free_request(struct blk_mq_hw_ctx *hctx,
 
 	blk_mq_rq_init(hctx, rq);
 	blk_mq_put_tag(hctx->tags, tag);
+
+	blk_mq_queue_exit(rq->q);
 }
 
 void blk_mq_free_request(struct request *rq)
@@ -772,6 +853,11 @@ static void blk_mq_make_request(struct request_queue *q, struct bio *bio)
 	int rw = bio_data_dir(bio);
 	struct request *rq;
 	unsigned int use_plug, request_count = 0;
+
+	if (blk_mq_queue_enter(q)) {
+		bio_endio(bio, -EIO);
+		return;
+	}
 
 	/*
 	 * If we have multiple hardware queues, just go directly to

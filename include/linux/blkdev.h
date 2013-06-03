@@ -478,6 +478,8 @@ struct request_queue {
 	struct throtl_data *td;
 #endif
 	struct rcu_head		rcu_head;
+	wait_queue_head_t	mq_freeze_wq;
+	struct percpu_counter	mq_usage_counter;
 };
 
 #define QUEUE_FLAG_QUEUED	1	/* uses generic tag queueing */
