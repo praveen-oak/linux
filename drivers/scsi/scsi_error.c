@@ -1876,8 +1876,9 @@ int scsi_error_handler(void *data)
 			continue;
 		}
 
-		if (shost->transportt->eh_strategy_handler)
+		if (shost->transportt->eh_strategy_handler) {
 			shost->transportt->eh_strategy_handler(shost);
+		}
 		else
 			scsi_unjam_host(shost);
 
@@ -1888,7 +1889,7 @@ int scsi_error_handler(void *data)
 		 * restart, we restart any I/O to any other devices on the bus
 		 * which are still online.
 		 */
-		scsi_restart_operations(shost);
+		//scsi_restart_operations(shost);
 		if (!shost->eh_noresume)
 			scsi_autopm_put_host(shost);
 	}

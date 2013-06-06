@@ -126,7 +126,7 @@ enum {
 	ATA_DEF_QUEUE		= 1,
 	/* tag ATA_MAX_QUEUE - 1 is reserved for internal commands */
 	ATA_MAX_QUEUE		= 32,
-	ATA_TAG_INTERNAL	= ATA_MAX_QUEUE - 1,
+	ATA_TAG_INTERNAL	= 0,//ATA_MAX_QUEUE - 1,
 	ATA_SHORT_PAUSE		= 16,
 
 	ATAPI_MAX_DRAIN		= 16 << 10,
@@ -491,6 +491,15 @@ enum ata_lpm_hints {
 	ATA_LPM_HIPM		= (1 << 1), /* may use HIPM */
 };
 
+enum ata_host_state {
+	ATA_HOST_CREATED = 1,
+	ATA_HOST_RUNNING,
+	ATA_HOST_CANCEL,
+	ATA_HOST_RECOVERY,
+	ATA_HOST_CANCEL_RECOVERY,
+	ATA_HOST_DEL_RECOVERY,
+};
+
 /* forward declarations */
 struct scsi_device;
 struct ata_port_operations;
@@ -553,12 +562,24 @@ struct ata_host {
 
 	struct ata_port		*simplex_claimed;	/* channel owning the DMA */
 	struct ata_port		*ports[0];
+
+	/* blk mq dependencies */
+	struct task_struct	*ehandler; /* Error recovery thread. */
+	struct completion	*eh_action;
+	wait_queue_head_t	host_wait;
+
+	enum ata_host_state	state;
+
+	unsigned int host_busy;		   /* commands actually active on low-level */
+	unsigned int host_failed;	   /* commands that failed. */
+	unsigned int host_eh_scheduled;    /* EH scheduled without command */
 };
 
 struct ata_queued_cmd {
 	struct ata_port		*ap;
 	struct ata_device	*dev;
 
+	/* FIXME: Make union */
 	/* Either implement atadone or scsidone. Not both. */
 	void			(*done_fn)(struct ata_queued_cmd *);
 
@@ -679,6 +700,9 @@ struct ata_device {
 	int			spdn_cnt;
 	/* ering is CLEAR_END, read comment above CLEAR_END */
 	struct ata_ering	ering;
+
+	/* used by blk mq */
+	unsigned int initialized;
 };
 
 /* Fields between ATA_DEVICE_CLEAR_BEGIN and ATA_DEVICE_CLEAR_END are

@@ -3404,6 +3404,7 @@ int ata_scsi_queuecmd(struct Scsi_Host *shost, struct scsi_cmnd *cmd)
 	dev = ata_scsi_find_dev(ap, scsidev);
 	if (likely(dev))
 		rc = __ata_scsi_queuecmd(cmd, dev);
+
 	else {
 		cmd->result = (DID_BAD_TARGET << 16);
 		cmd->scsi_done(cmd);
@@ -3589,8 +3590,7 @@ void ata_scsi_scan_host(struct ata_port *ap, int sync)
 	struct ata_link *link;
 	struct ata_device *dev;
 
-	printk("larlarlarlarlarlarlrla\n");
- repeat:
+repeat:
 	ata_for_each_link(link, ap, EDGE) {
 		ata_for_each_dev(dev, link, ENABLED) {
 			struct scsi_device *sdev;
@@ -3817,7 +3817,10 @@ void ata_scsi_hotplug(struct work_struct *work)
 			ata_scsi_handle_link_detach(&ap->pmp_link[i]);
 
 	/* scan for new ones */
-	ata_scsi_scan_host(ap, 0);
+	if (ata_is_blk(ap))
+		ata_blk_scan_host(ap, 0);
+	else
+		ata_scsi_scan_host(ap, 0);
 
 	mutex_unlock(&ap->scsi_scan_mutex);
 	DPRINTK("EXIT\n");

@@ -760,7 +760,9 @@ void ata_scsi_port_error_handler(struct Scsi_Host *host, struct ata_port *ap)
 
 		/* invoke EH, skip if unloading or suspended */
 		if (!(ap->pflags & (ATA_PFLAG_UNLOADING | ATA_PFLAG_SUSPENDED)))
+		{
 			ap->ops->error_handler(ap);
+		}
 		else {
 			/* if unloading, commence suicide */
 			if ((ap->pflags & ATA_PFLAG_UNLOADING) &&
@@ -802,7 +804,10 @@ void ata_scsi_port_error_handler(struct Scsi_Host *host, struct ata_port *ap)
 
 		spin_unlock_irqrestore(ap->lock, flags);
 		ata_eh_release(ap);
+	printk("--larlar\n");
+
 	} else {
+	printk("--larlar2\n");
 		WARN_ON(ata_qc_from_tag(ap, ap->link.active_tag) == NULL);
 		ap->ops->eng_timeout(ap);
 	}
@@ -845,9 +850,7 @@ void ata_port_wait_eh(struct ata_port *ap)
 	DEFINE_WAIT(wait);
 
  retry:
-	printk("take lock\n");
 	spin_lock_irqsave(ap->lock, flags);
-	printk("given lock\n");
 
 	while (ap->pflags & (ATA_PFLAG_EH_PENDING | ATA_PFLAG_EH_IN_PROGRESS)) {
 		prepare_to_wait(&ap->eh_wait_q, &wait, TASK_UNINTERRUPTIBLE);
@@ -859,7 +862,7 @@ void ata_port_wait_eh(struct ata_port *ap)
 
 	spin_unlock_irqrestore(ap->lock, flags);
 
-	printk("finished waiting\n");
+	printk("ata%u: finished waiting\n", ap->print_id);
 	/* make sure SCSI EH is complete */
 //	if (scsi_host_in_recovery(ap->scsi_host)) {
 //		ata_msleep(ap, 10);
@@ -1009,8 +1012,8 @@ void ata_std_sched_eh(struct ata_port *ap)
 		return;
 
 	ata_eh_set_pending(ap, 1);
-	//scsi_schedule_eh(ap->scsi_host);
-	printk("ata_std_sched_eh\n");
+	scsi_schedule_eh(ap->scsi_host);
+	
 	DPRINTK("port EH scheduled\n");
 }
 EXPORT_SYMBOL_GPL(ata_std_sched_eh);
@@ -3174,8 +3177,10 @@ static int ata_eh_revalidate_and_attach(struct ata_link *link,
 	 * device detection messages backwards.
 	 */
 	ata_for_each_dev(dev, link, ALL) {
-		if (!(new_mask & (1 << dev->devno)))
-			continue;
+		//if (!(new_mask & (1 << dev->devno))) {
+		//	printk("--------------new mask\n");
+		//	continue;
+		//}
 
 		dev->class = ehc->classes[dev->devno];
 
@@ -3841,6 +3846,7 @@ int ata_eh_recover(struct ata_port *ap, ata_prereset_fn_t prereset,
 		if (sata_pmp_attached(ap) && ata_is_host_link(link))
 			goto config_lpm;
 
+		printk("ata%u: ata_eh_revalidate_and_attach\n", ap->print_id);
 		/* revalidate existing devices and attach new ones */
 		rc = ata_eh_revalidate_and_attach(link, &dev);
 		if (rc)

@@ -90,10 +90,6 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 	u8 *cdb = qc->cdb;
 	int need_sense = (qc->err_mask != 0);
 
-	printk("Completion of tf:\n");
-	ata_dump_status(1, &qc->tf);
-	printk("Result tf:\n");
-	ata_dump_status(1, &qc->result_tf);
 	/* For ATA pass thru (SAT) commands, generate a sense block if
 	 * user mandated it or if there's an error.  Note that if we
 	 * generate because the user forced us to [CK_COND =1], a check
@@ -106,19 +102,17 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 	if (((cdb[0] == ATA_16) || (cdb[0] == ATA_12)) &&
 	    ((cdb[2] & 0x20) || need_sense)) {
 		ata_blk_gen_passthru_sense(qc);
-	} else {
-		if (!need_sense) {
-			//cmd->result = SAM_STAT_GOOD;
-		} else {
-			/* TODO: decide which descriptor format to use
-			 * for 48b LBA devices and call that here
-			 * instead of the fixed desc, which is only
-			 * good for smaller LBA (and maybe CHS?)
-			 * devices.
-			 */
-			ata_blk_gen_ata_sense(qc);
-		}
+	} else if (need_sense) {
+		/* TODO: decide which descriptor format to use
+		 * for 48b LBA devices and call that here
+		 * instead of the fixed desc, which is only
+		 * good for smaller LBA (and maybe CHS?)
+		 * devices.
+		 */
+		printk("ata%u ata_blk_qc_complete3\n", qc->ap->print_id);
+		ata_blk_gen_ata_sense(qc);
 	}
+	
 	
 	if (need_sense && !ap->ops->error_handler)
 		ata_dump_status(ap->print_id, &qc->result_tf);
@@ -128,3 +122,68 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 	ata_qc_free(qc);
 }
 
+inline int ata_is_blk(struct ata_port *ap)
+{
+	return (ap->ops->blk_port_register != 0);
+}
+
+
+
+void ata_blk_scan_host(struct ata_port *ap, int sync)
+{
+	int tries = 5;
+	struct ata_device *last_failed_dev = NULL;
+	struct ata_link *link;
+	struct ata_device *dev;
+
+ repeat:
+	ata_for_each_link(link, ap, EDGE) {
+		ata_for_each_dev(dev, link, ENABLED) {
+			
+			if (dev->initialized)
+				continue;
+
+		}
+	}
+
+	/* If we scanned while EH was in progress or allocation
+	 * failure occurred, scan would have failed silently.  Check
+	 * whether all devices are attached.
+	 */
+	ata_for_each_link(link, ap, EDGE) {
+		ata_for_each_dev(dev, link, ENABLED) {
+			if (!dev->sdev)
+				goto exit_loop;
+		}
+	}
+ exit_loop:
+	if (!link)
+		return;
+
+	/* we're missing some SCSI devices */
+	if (sync) {
+		/* If caller requested synchrnous scan && we've made
+		 * any progress, sleep briefly and repeat.
+		 */
+		if (dev != last_failed_dev) {
+			msleep(100);
+			last_failed_dev = dev;
+			goto repeat;
+		}
+
+		/* We might be failing to detect boot device, give it
+		 * a few more chances.
+		 */
+		if (--tries) {
+			msleep(100);
+			goto repeat;
+		}
+
+		ata_port_err(ap,
+			     "WARNING: synchronous ATA scan failed without making any progress, switching to async\n");
+	}
+
+	queue_delayed_work(system_long_wq, &ap->hotplug_task,
+			   round_jiffies_relative(HZ));
+
+}

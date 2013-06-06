@@ -928,8 +928,10 @@ static int sata_pmp_eh_recover(struct ata_port *ap)
 		link_tries[link->pmp] = ATA_EH_PMP_LINK_TRIES;
 
  retry:
+	printk("----sata_pmp_eh_recover: I'm here\n");
 	/* PMP attached? */
 	if (!sata_pmp_attached(ap)) {
+		printk("----sata_pmp_eh_recover: I'm here2\n");
 		rc = ata_eh_recover(ap, ops->prereset, ops->softreset,
 				    ops->hardreset, ops->postreset, NULL);
 		if (rc) {
@@ -1091,10 +1093,10 @@ static int sata_pmp_eh_recover(struct ata_port *ap)
  */
 void sata_pmp_error_handler(struct ata_port *ap)
 {
-	printk("sata_pmp_error_handler: Let's work this out\n");
 	ata_eh_autopsy(ap);
 	ata_eh_report(ap);
 	sata_pmp_eh_recover(ap);
+	printk("ata%u: sata_pmp_error_handler: Let's work this out\n", ap->print_id);
 	ata_eh_finish(ap);
 }
 

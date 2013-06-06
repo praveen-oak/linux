@@ -753,10 +753,8 @@ int ata_build_rw_tf(struct ata_taskfile *tf, struct ata_device *dev,
 	tf->flags |= ATA_TFLAG_ISADDR | ATA_TFLAG_DEVICE;
 	tf->flags |= tf_flags;
 
-	printk("NCQ or?\n");
 	if (ata_ncq_enabled(dev) && likely(tag != ATA_TAG_INTERNAL)) {
 		/* yay, NCQ */
-		printk("NCQ enabled\n");
 		if (!lba_48_ok(block, n_block))
 			return -ERANGE;
 
@@ -778,7 +776,6 @@ int ata_build_rw_tf(struct ata_taskfile *tf, struct ata_device *dev,
 		tf->lbah = (block >> 16) & 0xff;
 		tf->lbam = (block >> 8) & 0xff;
 		tf->lbal = block & 0xff;
-		printk("Setting some flags\n");
 		tf->device = ATA_LBA;
 		if (tf->flags & ATA_TFLAG_FUA)
 			tf->device |= 1 << 7;
@@ -1563,6 +1560,7 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 	unsigned int err_mask;
 	int rc;
 
+	//printk("ata%u: ata_exec_internal_sg\n", ap->print_id);
 	spin_lock_irqsave(ap->lock, flags);
 
 	/* no internal command while frozen */
@@ -1621,8 +1619,10 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 
 	qc->private_data = &wait;
 	qc->complete_fn = ata_qc_complete_internal;
+	//printk("ata%u: ata_exec_internal_sg2\n", ap->print_id);
 
 	ata_qc_issue(qc);
+	//printk("ata%u: ata_exec_internal_sg3\n", ap->print_id);
 
 	spin_unlock_irqrestore(ap->lock, flags);
 
@@ -1839,6 +1839,7 @@ static u32 ata_pio_mask_no_iordy(const struct ata_device *adev)
 unsigned int ata_do_dev_read_id(struct ata_device *dev,
 					struct ata_taskfile *tf, u16 *id)
 {
+	printk("|||||||| ata_exec_internal\n");
 	return ata_exec_internal(dev, tf, NULL, DMA_FROM_DEVICE,
 				     id, sizeof(id[0]) * ATA_ID_WORDS, 0);
 }
@@ -2166,7 +2167,6 @@ int ata_dev_configure(struct ata_device *dev)
 	char modelbuf[ATA_ID_PROD_LEN+1];
 	int rc;
 
-	printk("ata_dev_configure: I'm your father\n");
 	if (!ata_dev_enabled(dev) && ata_msg_info(ap)) {
 		ata_dev_info(dev, "%s: ENTER/EXIT -- nodev\n", __func__);
 		return 0;
@@ -2469,6 +2469,12 @@ int ata_dev_configure(struct ata_device *dev)
 		ata_dev_warn(dev, "WARNING: device requires firmware update to be fully functional\n");
 		ata_dev_warn(dev, "         contact the vendor or visit http://ata.wiki.kernel.org\n");
 	}
+
+	ap->dev = dev;
+	printk("ata%u: ata_dev_configure dev pointer %p\n", ap->print_id, &dev);
+	/* Device have been fully initialized. If driver uses mq, register the disk */
+	if (ata_is_blk(ap))
+		ap->ops->blk_port_register(ap);
 
 	return 0;
 
@@ -4575,13 +4581,14 @@ void ata_sg_clean(struct ata_queued_cmd *qc)
 
 	WARN_ON_ONCE(sg == NULL);
 
+//	printk("ata%u tag%u unmapping %u sg elements\n", ap->print_id, qc->tag, qc->n_elem);
 	VPRINTK("unmapping %u sg elements\n", qc->n_elem);
 
 	if (qc->n_elem)
 		dma_unmap_sg(ap->dev, sg, qc->orig_n_elem, dir);
 
 	qc->flags &= ~ATA_QCFLAG_DMAMAP;
-	qc->sg = NULL;
+	//qc->sg = NULL;
 }
 
 /**
@@ -4691,6 +4698,8 @@ static int ata_sg_setup(struct ata_queued_cmd *qc)
 	n_elem = dma_map_sg(ap->dev, qc->sg, qc->n_elem, qc->dma_dir);
 	if (n_elem < 1)
 		return -1;
+	
+//	printk("ata%u: tag%u %d sg elements mapped\n", ap->print_id, qc->tag, n_elem);
 
 	DPRINTK("%d sg elements mapped\n", n_elem);
 	qc->orig_n_elem = qc->n_elem;
@@ -4845,7 +4854,7 @@ void ata_qc_free(struct ata_queued_cmd *qc)
 	qc->flags = 0;
 	tag = qc->tag;
 	if (likely(ata_tag_valid(tag))) {
-		qc->tag = ATA_TAG_POISON;
+		//qc->tag = ATA_TAG_POISON;
 		clear_bit(tag, &ap->qc_allocated);
 	}
 }
@@ -5078,7 +5087,6 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 	struct ata_link *link = qc->dev->link;
 	u8 prot = qc->tf.protocol;
 
-	printk("qc->dev->link %p\n", qc->dev->link);
 	/* Make sure only one non-NCQ command is outstanding.  The
 	 * check is skipped for old EH because it reuses active qc to
 	 * request ATAPI sense.
@@ -5110,27 +5118,25 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 		goto sys_err;
 
 	// FIXME: Already been set up in AHCI driver. (but not for others)
-/*	if (ata_is_dma(prot) || (ata_is_pio(prot) &&
+	if (ata_is_dma(prot) || (ata_is_pio(prot) &&
 				 (ap->flags & ATA_FLAG_PIO_DMA)))
 		if (ata_sg_setup(qc))
 			goto sys_err;
-			*/
-	printk("4\n");
+			
+	//printk("ata%u: ata_qc_issue 4\n", ap->print_id);
 	/* if device is sleeping, schedule reset and abort the link */
 	if (unlikely(qc->dev->flags & ATA_DFLAG_SLEEPING)) {
-		printk("larlar\n");
+		//printk("ata%u: ata_qc_issue ERROR DFLAG_SLEEPING\n", ap->print_id);
 		link->eh_info.action |= ATA_EH_RESET;
 		ata_ehi_push_desc(&link->eh_info, "waking up from sleep");
-		printk("larlar1\n");
 		ata_link_abort(link);
-		printk("larlar2\n");
 		return;
 	}
 
 	ap->ops->qc_prep(qc);
-	printk("ap->ops->qc_prep executed ap->private_data: %p\n", ap->private_data);
+	
 	qc->err_mask |= ap->ops->qc_issue(qc);
-	printk("ap->ops->qc_issue executed\n");
+	//printk("ata%u: ap->ops->qc_issue executed\n", ap->print_id);
 	if (unlikely(qc->err_mask))
 		goto err;
 	return;
@@ -5620,7 +5626,7 @@ void ata_link_init(struct ata_port *ap, struct ata_link *link, int pmp)
 	memset((void *)link + ATA_LINK_CLEAR_BEGIN, 0,
 	       ATA_LINK_CLEAR_END - ATA_LINK_CLEAR_BEGIN);
 
-	printk("Storing link %p into ap %p\n", link, ap);
+	//printk("Storing link %p into ap %p\n", link, ap);
 	link->ap = ap;
 	link->pmp = pmp;
 	link->active_tag = ATA_TAG_POISON;
@@ -5687,7 +5693,10 @@ int sata_link_init_spd(struct ata_link *link)
 struct ata_port *ata_port_alloc(struct ata_host *host)
 {
 	struct ata_port *ap;
-	printk("ata_port_alloc: i was here\n");
+	struct ata_queued_cmd *qc;
+	unsigned int i;
+
+	//printk("ata_port_alloc: i was here\n");
 	DPRINTK("ENTER\n");
 
 	ap = kzalloc(sizeof(*ap), GFP_KERNEL);
@@ -5728,6 +5737,13 @@ struct ata_port *ata_port_alloc(struct ata_host *host)
 	ap->stats.idle_irq = 1;
 #endif
 	ata_sff_port_init(ap);
+
+	for (i = 0; i < ATA_MAX_QUEUE; i++) {
+		qc = ata_mq_qc_init(ap, i);
+	
+		qc->tag = i;
+		//printk("ata%u setting tag %u on %p\n", ap->print_id, i, &qc);
+	}
 
 	return ap;
 }
@@ -6119,13 +6135,10 @@ int ata_port_probe(struct ata_port *ap)
 	int rc = 0;
 
 	if (ap->ops->error_handler) {
-		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM1a\n");
 		__ata_port_probe(ap);
-		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM3\n");
 		ata_port_wait_eh(ap);
 		
 	} else {
-		printk("BOOOOOOOOOOOOOOOOOOOOOOOOOOM2\n");
 		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
 		rc = ata_bus_probe(ap);
 		DPRINTK("ata%u: bus probe end\n", ap->print_id);
@@ -6138,7 +6151,6 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 {
 	struct ata_port *ap = data;
 
-	printk("async_port_probe2\n");
 	/*
 	 * If we're not allowed to scan this host in parallel,
 	 * we need to wait until all previous scans have completed
@@ -6150,14 +6162,14 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 		async_synchronize_cookie(cookie);
 
 	(void)ata_port_probe(ap);
-	printk("async_port_probe3--------------\n");
 
 	/* in order to keep device order, we need to synchronize at this point */
 	async_synchronize_cookie(cookie);
 
-	ata_scsi_scan_host(ap, 1);
-	printk("async_port_probe4---------------\n");
-
+	if (ata_is_blk(ap))
+		ata_blk_scan_host(ap, 1);
+	else
+		ata_scsi_scan_host(ap, 1);
 }
 
 static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
@@ -6170,17 +6182,46 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 		if (rc)
 			goto err_reg;
 	}
-	printk("ata_add_hosts: Boom\n");
 
 	rc = 0;
 
 	for (i = 0; i< host->n_ports;i++) {
 		struct ata_port *ap = host->ports[i];
+// Look at ata_scsi_error for what to do next.
+		if (ata_is_blk(ap)) {
+			ap->scsi_host = scsi_host_alloc(sht, 0);
+			if (!ap->scsi_host)
+			{
+				rc = -EINVAL;
+				goto err_alloc;
+			}
 
-		if (!ap->ops->blk_port_register)
-			continue;
+			scsi_host_set_state(ap->scsi_host, SHOST_RUNNING);
 
-		rc = ata_scsi_add_port(ap, sht);
+			/* Let host_busy be different from host_failed */
+			ap->scsi_host->host_busy = 0;
+			//ap->scsi_host->host_failed = 1;
+			//
+			//attach ap to scsi host
+			ap->scsi_host->eh_noresume = 1;
+			*(struct ata_port **)&ap->scsi_host->hostdata[0] = ap;
+
+			ap->scsi_host->transportt = ata_scsi_transport_template;
+			ap->scsi_host->unique_id = ap->print_id;
+			ap->scsi_host->max_id = 16;
+			ap->scsi_host->max_lun = 1;
+			ap->scsi_host->max_channel = 1;
+			ap->scsi_host->max_cmd_len = 16;
+
+			/* Schedule policy is determined by ->qc_defer()
+			 * callback and it needs to see every deferred qc.
+			 * Set host_blocked to 1 to prevent SCSI midlayer from
+			 * automatically deferring requests.
+			 */
+			ap->scsi_host->max_host_blocked = 1;
+
+			} else
+			rc = ata_scsi_add_port(ap, sht);
 
 		if (rc)
 			goto err_alloc;
@@ -6189,8 +6230,6 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 	return rc;
 
 err_alloc:
-	printk("ata_add_hosts: Boom2\n");
-
 	while (--i >= 0) {
 		struct ata_port *ap = host->ports[i];
 
@@ -6285,12 +6324,6 @@ int ata_host_register(struct ata_host *host, struct scsi_host_template *sht)
 	for (i = 0; i < host->n_ports; i++) {
 		struct ata_port *ap = host->ports[i];
 		async_schedule(async_port_probe, ap);
-	}
-
-	/* if implemented, register device in block layer */
-	for (i = 0; i < host->n_ports; i++) {
-		struct ata_port *ap = host->ports[i];
-		ap->ops->blk_port_register(ap);
 	}
 
 	return 0;
@@ -6937,8 +6970,6 @@ int ata_dev_printk(const struct ata_device *dev, const char *level,
 
 	vaf.fmt = fmt;
 	vaf.va = &args;
-
-	printk("Using link %p with port %p\n", dev->link, dev->link->ap);
 
 	r = printk("%sata%u.%02u: %pV",
 		   level, dev->link->ap->print_id, dev->link->pmp + dev->devno,
