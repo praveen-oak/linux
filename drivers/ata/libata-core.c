@@ -2470,11 +2470,10 @@ int ata_dev_configure(struct ata_device *dev)
 		ata_dev_warn(dev, "         contact the vendor or visit http://ata.wiki.kernel.org\n");
 	}
 
-	ap->dev = dev;
 	printk("ata%u: ata_dev_configure dev pointer %p\n", ap->print_id, &dev);
 	/* Device have been fully initialized. If driver uses mq, register the disk */
-	if (ata_is_blk(ap))
-		ap->ops->blk_port_register(ap);
+	
+	ap->ops->blk_device_register(dev);
 
 	return 0;
 
@@ -6137,7 +6136,6 @@ int ata_port_probe(struct ata_port *ap)
 	if (ap->ops->error_handler) {
 		__ata_port_probe(ap);
 		ata_port_wait_eh(ap);
-		
 	} else {
 		DPRINTK("ata%u: bus probe begin\n", ap->print_id);
 		rc = ata_bus_probe(ap);
@@ -6166,10 +6164,7 @@ static void async_port_probe(void *data, async_cookie_t cookie)
 	/* in order to keep device order, we need to synchronize at this point */
 	async_synchronize_cookie(cookie);
 
-	if (ata_is_blk(ap))
-		ata_blk_scan_host(ap, 1);
-	else
-		ata_scsi_scan_host(ap, 1);
+	ata_blk_scan_host(ap, 1);
 }
 
 static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
@@ -6187,41 +6182,37 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 
 	for (i = 0; i< host->n_ports;i++) {
 		struct ata_port *ap = host->ports[i];
-// Look at ata_scsi_error for what to do next.
-		if (ata_is_blk(ap)) {
-			ap->scsi_host = scsi_host_alloc(sht, 0);
-			if (!ap->scsi_host)
-			{
-				rc = -EINVAL;
-				goto err_alloc;
-			}
+		
+		ap->scsi_host = scsi_host_alloc(sht, 0);
+		if (!ap->scsi_host)
+		{
+			rc = -EINVAL;
+			goto err_alloc;
+		}
 
-			scsi_host_set_state(ap->scsi_host, SHOST_RUNNING);
+		scsi_host_set_state(ap->scsi_host, SHOST_RUNNING);
 
-			/* Let host_busy be different from host_failed */
-			ap->scsi_host->host_busy = 0;
-			//ap->scsi_host->host_failed = 1;
-			//
-			//attach ap to scsi host
-			ap->scsi_host->eh_noresume = 1;
-			*(struct ata_port **)&ap->scsi_host->hostdata[0] = ap;
+		/* Let host_busy be different from host_failed */
+		ap->scsi_host->host_busy = 0;
+		//ap->scsi_host->host_failed = 1;
+		//
+		//attach ap to scsi host
+		ap->scsi_host->eh_noresume = 1;
+		*(struct ata_port **)&ap->scsi_host->hostdata[0] = ap;
 
-			ap->scsi_host->transportt = ata_scsi_transport_template;
-			ap->scsi_host->unique_id = ap->print_id;
-			ap->scsi_host->max_id = 16;
-			ap->scsi_host->max_lun = 1;
-			ap->scsi_host->max_channel = 1;
-			ap->scsi_host->max_cmd_len = 16;
+		ap->scsi_host->transportt = ata_scsi_transport_template;
+		ap->scsi_host->unique_id = ap->print_id;
+		ap->scsi_host->max_id = 16;
+		ap->scsi_host->max_lun = 1;
+		ap->scsi_host->max_channel = 1;
+		ap->scsi_host->max_cmd_len = 16;
 
-			/* Schedule policy is determined by ->qc_defer()
-			 * callback and it needs to see every deferred qc.
-			 * Set host_blocked to 1 to prevent SCSI midlayer from
-			 * automatically deferring requests.
-			 */
-			ap->scsi_host->max_host_blocked = 1;
-
-			} else
-			rc = ata_scsi_add_port(ap, sht);
+		/* Schedule policy is determined by ->qc_defer()
+		 * callback and it needs to see every deferred qc.
+		 * Set host_blocked to 1 to prevent SCSI midlayer from
+		 * automatically deferring requests.
+		 */
+		ap->scsi_host->max_host_blocked = 1;
 
 		if (rc)
 			goto err_alloc;
@@ -6231,12 +6222,8 @@ static int ata_add_hosts(struct ata_host *host, struct scsi_host_template *sht)
 
 err_alloc:
 	while (--i >= 0) {
-		struct ata_port *ap = host->ports[i];
-
-		if (ap->ops->blk_port_deregister)
-			ap->ops->blk_port_deregister(ap);
-		else
-			ata_scsi_remove_port(ap);
+		//struct ata_port *ap = host->ports[i];
+		//ap->ops->blk_port_deregister(ap);
 	}
 err_reg:
 	return rc;

@@ -903,8 +903,8 @@ struct ata_port_operations {
 	int (*blk_host_register)(struct ata_host *host);
 	int (*blk_host_deregister)(struct ata_host *host);
 
-	int (*blk_port_register)(struct ata_port *ap);
-	int (*blk_port_deregister)(struct ata_port *ap);
+	int (*blk_device_register)(struct ata_device *dev);
+	int (*blk_device_deregister)(struct ata_device *dev);
 
 
 	/*

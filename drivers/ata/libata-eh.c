@@ -982,21 +982,13 @@ void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 	qc->flags |= ATA_QCFLAG_FAILED;
 	ata_eh_set_pending(ap, 1);
 
-	if (ata_is_blk(qc->ap)) {
-		q = qc->request_queue;
-		rq = qc->request;
-	} else {
-		q = qc->scsicmd->device->request_queue;
-		rq = qc->scsicmd->request;
-	}
-
 	/* The following will fail if timeout has already expired.
 	 * ata_scsi_error() takes care of such scmds on EH entry.
 	 * Note that ATA_QCFLAG_FAILED is unconditionally set after
 	 * this function completes.
 	 */
-	spin_lock_irqsave(q->queue_lock, flags);
-	blk_abort_request(rq);
+	spin_lock_irqsave(qc->request_queue->queue_lock, flags);
+	blk_abort_request(qc->request);
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 

@@ -10,12 +10,7 @@
 
 #include "libata.h"
 
-inline int ata_is_blk(struct ata_port *ap)
-{
-	return (ap->ops->blk_port_register != 0);
-}
-
-struct ata_queued_cmd *ata_mq_qc_init(struct ata_port *ap, int tag)
+struct ata_queued_cmd *ata_blk_qc_init(struct ata_port *ap, int tag)
 {
 	struct ata_queued_cmd *qc; 
 

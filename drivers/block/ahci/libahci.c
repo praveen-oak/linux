@@ -81,8 +81,8 @@ static void ahci_port_stop(struct ata_port *ap);
 
 static int ahci_host_register(struct ata_host *host);
 static int ahci_host_deregister(struct ata_host *host);
-static int ahci_port_register(struct ata_port *ap);
-static int ahci_port_deregister(struct ata_port *ap);
+static int ahci_device_register(struct ata_device *dev);
+static int ahci_device_deregister(struct ata_device *dev);
 
 static void ahci_qc_prep(struct ata_queued_cmd *qc);
 static int ahci_pmp_qc_defer(struct ata_queued_cmd *qc);
@@ -159,11 +159,16 @@ EXPORT_SYMBOL_GPL(ahci_sdev_attrs);
 struct ahci_blk {
 	struct list_head list;
 	unsigned int index;
+
 	struct request_queue *q;
 	struct gendisk *disk;
-	struct ata_port *ap;
+	struct ata_device *dev;
 
-	spinlock_t lock;
+	struct blk_mq_reg *reg;
+
+
+	/* FIXME: Cache align */
+	spinlock_t lock ____cacheline_aligned;
 };
 
 struct ata_port_operations ahci_ops = {
@@ -204,8 +209,8 @@ struct ata_port_operations ahci_ops = {
 	.blk_host_register		= ahci_host_register,
 	.blk_host_deregister	= ahci_host_deregister,
 
-	.blk_port_register		= ahci_port_register,
-	.blk_port_deregister	= ahci_port_deregister,
+	.blk_device_register		= ahci_device_register,
+	.blk_device_deregister	= ahci_device_deregister,
 };
 EXPORT_SYMBOL_GPL(ahci_ops);
 
@@ -2370,9 +2375,9 @@ static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	struct request_queue *q = hctx->queue;
 	struct ahci_blk *p = q->queuedata;
-	struct ata_port *ap = p->ap;
-	struct ata_device *dev = ap->dev;
-	struct ata_queued_cmd *qc = NULL;
+	struct ata_device *dev = p->dev;
+	struct ata_port *ap = dev->link->ap;
+	struct ata_queued_cmd *qc = rq->special;
 	int rc;
 	int dma_dir = rq_data_dir(rq) == READ ? DMA_FROM_DEVICE : DMA_TO_DEVICE;
 	u64 start = blk_rq_pos(rq);
@@ -2388,15 +2393,11 @@ static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 		return 0;
 	}
 
-	qc = ata_blk_qc_init(ap, rq->tag);
+	__ata_qc_reinit(qc);
 	
 	// Setup DMA gatter/setter dma_map_sg
 	qc->dma_dir = dma_dir;
-	qc->tag = rq->tag;
 	//qc->nsect = nsect;
-
-	qc->dev = dev;
-	qc->ap = ap;
 
 	if (qc->sg == NULL) {
 		qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, NUMA_NO_NODE);
@@ -2466,19 +2467,19 @@ static struct blk_mq_reg ahci_mq_reg = {
 static void ahci_init_cmd(void *data, struct blk_mq_hw_ctx *hctx,
 			  struct request *rq, unsigned int i)
 {
-	struct ata_port *ap = rq->special;
-	struct ata_queued_cmd *qc;
-	struct scatterlist *sg;
-	// FIXME: Insert ATA sg constant instead
-	// Check to see if it has been allocated.
-	// Or.. unpoint it.
-	//qc = ata_mq_qc_init(ap, i);
-	
-	//qc->tag = i;
+	struct ahci_blk *blk = data;
+	struct ata_device *dev = blk->dev;
+	struct ata_port *ap = dev->link->ap;
+	struct ata_queued_cmd *qc = rq->special;
 
-	//sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, NUMA_NO_NODE);
-	//sg_init_table(sg, ATA_MAX_QUEUE);
-	//qc->sg = sg;
+	qc->ap = ap;
+	qc->dev = dev;
+	qc->tag = i;
+	qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, blk->reg->numa_node);
+
+	sg_init_table(qc->sg, ATA_MAX_QUEUE);
+
+	__ata_qc_reinit(qc);
 }
 
 static int ahci_blk_open(struct block_device *bdev, fmode_t mode)
@@ -2525,14 +2526,14 @@ static int ahci_host_deregister(struct ata_host *host)
  * use MQ, else SQ blk layer.
  * Lookup code to figure out which node a device is attached.
  */
-static int ahci_port_register(struct ata_port *ap)
+static int ahci_device_register(struct ata_device *dev)
 {
 	int size;
 	struct gendisk *disk;
 	struct ahci_blk *ahci_blk;
-	struct ata_device *dev = ap->dev;
+	struct ata_port *ap = dev->link->ap;
 
-	ahci_blk = kmalloc_node(sizeof(*ahci_blk), GFP_KERNEL, NUMA_NO_NODE);
+	ahci_blk = kmalloc_node(sizeof(*ahci_blk), GFP_KERNEL, ahci_mq_reg.numa_node);
 	if (!ahci_blk)
 		return -ENOMEM;
 
@@ -2546,6 +2547,7 @@ static int ahci_port_register(struct ata_port *ap)
 	}
 	
 	ahci_blk->q->queuedata = ahci_blk;
+	ahci_blk->reg = &ahci_mq_reg;
 
 	disk = ahci_blk->disk = alloc_disk_node(1, NUMA_NO_NODE);
 	if (!disk) {
@@ -2562,10 +2564,9 @@ static int ahci_port_register(struct ata_port *ap)
 	set_capacity(disk, dev->n_sectors);
 	
 	mutex_lock(&lock);
-	printk("Initializing ahci_minor_index: %i\n", ahci_minor_index);
 	ahci_blk->index = ahci_minor_index++;
 	ahci_blk->disk = disk;
-	ahci_blk->ap = ap;
+	ahci_blk->dev = dev;
 	list_add_tail(&(ahci_blk->list), &ahci_blk_list);
 	mutex_unlock(&lock);
 
@@ -2578,7 +2579,7 @@ static int ahci_port_register(struct ata_port *ap)
 	disk->queue		= ahci_blk->q;
 	sprintf(disk->disk_name, "ahci%d", ahci_blk->index);
 
-	blk_mq_init_commands(ahci_blk->q, ahci_init_cmd, ap);
+	blk_mq_init_commands(ahci_blk->q, ahci_init_cmd, ahci_blk);
 
 	printk("ata%u: initializing block device ahci%d with n_sectors: %u dev pointer: %p\n", ap->print_id, ahci_blk->index, dev->n_sectors, &ap->dev);
 
@@ -2587,7 +2588,7 @@ static int ahci_port_register(struct ata_port *ap)
 	return 0;
 }
 
-static int ahci_port_deregister(struct ata_port *ap)
+static int ahci_device_deregister(struct ata_device *dev)
 {
 	return 0;
 }

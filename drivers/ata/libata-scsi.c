@@ -3817,10 +3817,7 @@ void ata_scsi_hotplug(struct work_struct *work)
 			ata_scsi_handle_link_detach(&ap->pmp_link[i]);
 
 	/* scan for new ones */
-	if (ata_is_blk(ap))
-		ata_blk_scan_host(ap, 0);
-	else
-		ata_scsi_scan_host(ap, 0);
+	ata_blk_scan_host(ap, 0);
 
 	mutex_unlock(&ap->scsi_scan_mutex);
 	DPRINTK("EXIT\n");
