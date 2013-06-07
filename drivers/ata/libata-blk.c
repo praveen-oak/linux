@@ -10,26 +10,21 @@
 
 #include "libata.h"
 
-inline struct request_queue *ata_get_qc_request_queue(struct ata_queued_cmd *qc)
+inline int ata_is_blk(struct ata_port *ap)
 {
-	struct request_queue *q;
-
-	if (qc->request_queue)
-		q = qc->request_queue;
-	//else
-	//	q = qc->scsicmd->device->request_queue;
-
-	return q;
+	return (ap->ops->blk_port_register != 0);
 }
 
-inline struct request *ata_get_qc_request(struct ata_queued_cmd *qc)
+struct ata_queued_cmd *ata_mq_qc_init(struct ata_port *ap, int tag)
 {
-	struct request *rq;
+	struct ata_queued_cmd *qc; 
 
-	if (qc->request)
-		rq = qc->request;
+	qc = __ata_qc_from_tag(ap, tag);
 
-	return rq;
+	if (qc)
+		__ata_qc_reinit(qc);
+
+	return qc;
 }
 
 static void ata_blk_gen_ata_sense(struct ata_queued_cmd *qc)
@@ -79,11 +74,6 @@ static void ata_blk_gen_passthru_sense(struct ata_queued_cmd *qc)
 	BUG();
 }
 
-void ata_blk_qc_prepare(struct ata_queued_cmd *qc)
-{
-	BUG();
-}
-
 void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
@@ -121,12 +111,6 @@ void ata_blk_qc_complete(struct ata_queued_cmd *qc)
 
 	ata_qc_free(qc);
 }
-
-inline int ata_is_blk(struct ata_port *ap)
-{
-	return (ap->ops->blk_port_register != 0);
-}
-
 
 
 void ata_blk_scan_host(struct ata_port *ap, int sync)

@@ -2388,7 +2388,7 @@ static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 		return 0;
 	}
 
-	qc = ata_mq_qc_init(ap, rq->tag);
+	qc = ata_blk_qc_init(ap, rq->tag);
 	
 	// Setup DMA gatter/setter dma_map_sg
 	qc->dma_dir = dma_dir;

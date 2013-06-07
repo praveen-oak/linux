@@ -973,8 +973,8 @@ static void ata_eh_set_pending(struct ata_port *ap, int fastdrain)
 void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
-	struct request_queue *q = ata_get_qc_request_queue(qc);
-	struct request *rq = ata_get_qc_request(qc);
+	struct request_queue *q;
+	struct request *rq;
 	unsigned long flags;
 
 	WARN_ON(!ap->ops->error_handler);
@@ -982,19 +982,22 @@ void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 	qc->flags |= ATA_QCFLAG_FAILED;
 	ata_eh_set_pending(ap, 1);
 
+	if (ata_is_blk(qc->ap)) {
+		q = qc->request_queue;
+		rq = qc->request;
+	} else {
+		q = qc->scsicmd->device->request_queue;
+		rq = qc->scsicmd->request;
+	}
+
 	/* The following will fail if timeout has already expired.
 	 * ata_scsi_error() takes care of such scmds on EH entry.
 	 * Note that ATA_QCFLAG_FAILED is unconditionally set after
 	 * this function completes.
 	 */
-//	spin_lock_irqsave(q->queue_lock, flags);
-	// Eh... how to we tell mq to remove the request?
-	// ah... we reschedule it to try, and let mq handle it taking
-	// it off.... for now.. lets just continue to get it actually
-	// working...
-	printk("libata-eh.c Command should have been aborted...\n");
-	//blk_abort_request(rq);
-//	spin_unlock_irqrestore(q->queue_lock, flags);
+	spin_lock_irqsave(q->queue_lock, flags);
+	blk_abort_request(rq);
+	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
 /**

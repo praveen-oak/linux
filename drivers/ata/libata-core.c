@@ -5739,7 +5739,7 @@ struct ata_port *ata_port_alloc(struct ata_host *host)
 	ata_sff_port_init(ap);
 
 	for (i = 0; i < ATA_MAX_QUEUE; i++) {
-		qc = ata_mq_qc_init(ap, i);
+		qc = ata_blk_qc_init(ap, i);
 	
 		qc->tag = i;
 		//printk("ata%u setting tag %u on %p\n", ap->print_id, i, &qc);
