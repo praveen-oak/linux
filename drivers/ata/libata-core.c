@@ -68,6 +68,8 @@
 #include <linux/pm_runtime.h>
 #include <linux/platform_device.h>
 
+#include <linux/blk-mq.h>
+
 #include "libata.h"
 #include "libata-transport.h"
  
@@ -1520,6 +1522,19 @@ static void ata_qc_complete_internal(struct ata_queued_cmd *qc)
 	complete(waiting);
 }
 
+struct ata_queued_cmd *ata_get_int_command(struct ata_device *dev)
+{
+	struct request *rq;
+
+	rq = blk_mq_alloc_reserved_request(dev->request_queue, 0, __GFP_WAIT);
+	return rq->special;
+}
+
+void ata_put_int_command(struct ata_device *dev, struct ata_queued_cmd *qc)
+{
+	blk_mq_free_request(blk_mq_rq_from_pdu(qc));
+}
+
 /**
  *	ata_exec_internal_sg - execute libata internal command
  *	@dev: Device to which the command is sent
@@ -1569,26 +1584,7 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 		return AC_ERR_SYSTEM;
 	}
 
-	/* initialize internal qc */
-
-	/* XXX: Tag 0 is used for drivers with legacy EH as some
-	 * drivers choke if any other tag is given.  This breaks
-	 * ata_tag_internal() test for those drivers.  Don't use new
-	 * EH stuff without converting to it.
-	 */
-	if (ap->ops->error_handler)
-		tag = ATA_TAG_INTERNAL;
-	else
-		tag = 0;
-
-	if (test_and_set_bit(tag, &ap->qc_allocated))
-		BUG();
-	qc = __ata_qc_from_tag(ap, tag);
-
-	qc->tag = tag;
-	qc->scsicmd = NULL;
-	qc->ap = ap;
-	qc->dev = dev;
+	qc = ata_get_int_command(dev);
 	ata_qc_reinit(qc);
 
 	preempted_tag = link->active_tag;
@@ -1685,7 +1681,7 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 			qc->err_mask &= ~AC_ERR_OTHER;
 	}
 
-	/* finish up */
+	/* finish up and release the internal tag*/
 	spin_lock_irqsave(ap->lock, flags);
 
 	*tf = qc->result_tf;
@@ -1701,6 +1697,8 @@ unsigned ata_exec_internal_sg(struct ata_device *dev,
 
 	if ((err_mask & AC_ERR_TIMEOUT) && auto_timeout)
 		ata_internal_cmd_timed_out(dev, command);
+
+	ata_put_int_command(dev, qc);
 
 	return err_mask;
 }
@@ -4844,18 +4842,7 @@ struct ata_queued_cmd *ata_qc_new_init(struct ata_device *dev)
  */
 void ata_qc_free(struct ata_queued_cmd *qc)
 {
-	struct ata_port *ap;
-	unsigned int tag;
-
-	WARN_ON_ONCE(qc == NULL); /* ata_qc_from_tag _might_ return NULL */
-	ap = qc->ap;
-
 	qc->flags = 0;
-	tag = qc->tag;
-	if (likely(ata_tag_valid(tag))) {
-		//qc->tag = ATA_TAG_POISON;
-		clear_bit(tag, &ap->qc_allocated);
-	}
 }
 
 void __ata_qc_complete(struct ata_queued_cmd *qc)

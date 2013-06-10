@@ -2360,6 +2360,7 @@ static void ahci_port_stop(struct ata_port *ap)
 
 static void ahci_done_fn(struct ata_queued_cmd *qc)
 {
+
 	int err = 0;
 
 	if (qc->err_mask)
@@ -2368,7 +2369,7 @@ static void ahci_done_fn(struct ata_queued_cmd *qc)
 		printk("AHCI-mq error occured. %i", err);
 	}
 
-	blk_mq_end_io(qc->request, err);
+	blk_mq_end_io(qc->rq, err);
 }
 
 static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
@@ -2421,9 +2422,6 @@ static int ahci_submit_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 	qc->complete_fn = ata_blk_qc_complete;
 	qc->done_fn = ahci_done_fn;
 
-	qc->request = rq;
-	qc->request_queue = q;
-
 	ata_qc_issue(qc);
 
 	return 0;
@@ -2475,8 +2473,9 @@ static void ahci_init_cmd(void *data, struct blk_mq_hw_ctx *hctx,
 	qc->ap = ap;
 	qc->dev = dev;
 	qc->tag = i;
-	qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, blk->reg->numa_node);
+	qc->rq = rq;
 
+	qc->sg = kmalloc_node(sizeof(struct scatterlist) * ATA_MAX_QUEUE, GFP_KERNEL, blk->reg->numa_node);
 	sg_init_table(qc->sg, ATA_MAX_QUEUE);
 
 	__ata_qc_reinit(qc);

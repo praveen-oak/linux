@@ -73,6 +73,8 @@ extern unsigned ata_exec_internal(struct ata_device *dev,
 				  struct ata_taskfile *tf, const u8 *cdb,
 				  int dma_dir, void *buf, unsigned int buflen,
 				  unsigned long timeout);
+extern struct ata_queued_cmd *ata_get_int_command(struct ata_device *dev);
+extern void ata_put_int_command(struct ata_device *dev, struct ata_queued_cmd *qc);
 extern unsigned ata_exec_internal_sg(struct ata_device *dev,
 				     struct ata_taskfile *tf, const u8 *cdb,
 				     int dma_dir, struct scatterlist *sg,

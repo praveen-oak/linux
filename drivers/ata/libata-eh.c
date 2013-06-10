@@ -973,6 +973,7 @@ static void ata_eh_set_pending(struct ata_port *ap, int fastdrain)
 void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
+	struct ata_device *dev = qc->dev;
 	struct request_queue *q;
 	struct request *rq;
 	unsigned long flags;
@@ -987,8 +988,8 @@ void ata_qc_schedule_eh(struct ata_queued_cmd *qc)
 	 * Note that ATA_QCFLAG_FAILED is unconditionally set after
 	 * this function completes.
 	 */
-	spin_lock_irqsave(qc->request_queue->queue_lock, flags);
-	blk_abort_request(qc->request);
+	spin_lock_irqsave(dev->request_queue->queue_lock, flags);
+	blk_abort_request(dev->request);
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 

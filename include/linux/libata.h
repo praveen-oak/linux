@@ -618,8 +618,7 @@ struct ata_queued_cmd {
 
 	/* ata-blk specific */
 	int result;
-	struct request *request;
-	struct request_queue *request_queue;
+	struct request *rq;
 
 	// TODO: Needed?
 #define ATA_SENSE_BUFFERSIZE	96
@@ -703,6 +702,11 @@ struct ata_device {
 
 	/* used by blk mq */
 	unsigned int initialized;
+
+	struct request *request;
+	struct request_queue *request_queue;
+
+
 };
 
 /* Fields between ATA_DEVICE_CLEAR_BEGIN and ATA_DEVICE_CLEAR_END are
@@ -805,8 +809,8 @@ struct ata_port {
 	unsigned int		udma_mask;
 	unsigned int		cbl;	/* cable type; ATA_CBL_xxx */
 
-	struct ata_queued_cmd	qcmd[ATA_MAX_QUEUE];
-	unsigned long		qc_allocated;
+	//struct ata_queued_cmd	qcmd[ATA_MAX_QUEUE];
+	//unsigned long		qc_allocated;
 	unsigned int		qc_active;
 	int			nr_active_links; /* #links with active qcs */
 
@@ -1548,25 +1552,18 @@ static inline void ata_qc_set_polling(struct ata_queued_cmd *qc)
 	qc->tf.ctl |= ATA_NIEN;
 }
 
-static inline struct ata_queued_cmd *__ata_qc_from_tag(struct ata_port *ap,
-						       unsigned int tag)
-{
-	if (likely(ata_tag_valid(tag)))
-		return &ap->qcmd[tag];
-	return NULL;
-}
-
-static inline struct ata_queued_cmd *ata_qc_from_tag(struct ata_port *ap,
+static static inline struct ata_queued_cmd *ata_qc_from_tag(struct ata_port *ap,
 						     unsigned int tag)
 {
-	struct ata_queued_cmd *qc = __ata_qc_from_tag(ap, tag);
+	BUG();
+	//struct ata_queued_cmd *qc = __ata_qc_from_tag(ap, tag);
 
-	if (unlikely(!qc) || !ap->ops->error_handler)
-		return qc;
+	//if (unlikely(!qc) || !ap->ops->error_handler)
+	//	return qc;
 
-	if ((qc->flags & (ATA_QCFLAG_ACTIVE |
-			  ATA_QCFLAG_FAILED)) == ATA_QCFLAG_ACTIVE)
-		return qc;
+	//if ((qc->flags & (ATA_QCFLAG_ACTIVE |
+	//		  ATA_QCFLAG_FAILED)) == ATA_QCFLAG_ACTIVE)
+	//	return qc;
 
 	return NULL;
 }
