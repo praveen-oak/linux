@@ -150,10 +150,9 @@ void nvme_unmap_user_pages(struct nvme_dev *dev, int write,
 			struct nvme_iod *iod);
 struct nvme_queue *get_nvmeq(struct nvme_dev *dev);
 void put_nvmeq(struct nvme_queue *nvmeq);
-int nvme_submit_sync_cmd(struct nvme_queue *nvmeq, struct nvme_command *cmd,
-						u32 *result, unsigned timeout);
-int nvme_submit_flush_data(struct nvme_queue *nvmeq, struct nvme_ns *ns);
-int nvme_submit_admin_cmd(struct nvme_dev *, struct nvme_command *,
+int nvme_submit_user_sync_cmd(struct nvme_ns *ns, struct nvme_command *cmd,
+							u32 *result);
+int nvme_submit_admin_sync_cmd(struct nvme_dev *dev, struct nvme_command *cmd,
 							u32 *result);
 int nvme_identify(struct nvme_dev *, unsigned nsid, unsigned cns,
 							dma_addr_t dma_addr);
