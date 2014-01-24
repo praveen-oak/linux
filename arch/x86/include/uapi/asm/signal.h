@@ -12,7 +12,7 @@ struct siginfo;
 #ifndef __KERNEL__
 /* Here we must cater to libcs that poke about in kernel headers.  */
 
-#define NSIG		32
+#define NSIG		33
 typedef unsigned long sigset_t;
 
 #endif /* __KERNEL__ */
@@ -60,6 +60,8 @@ typedef unsigned long sigset_t;
 /* These should not be considered constants from userland.  */
 #define SIGRTMIN	32
 #define SIGRTMAX	_NSIG
+
+#define SIGIOERR	33
 
 /*
  * SA_FLAGS values:
