@@ -30,6 +30,7 @@ struct sched_param {
 
 #include <linux/smp.h>
 #include <linux/sem.h>
+#include <linux/semaphore.h>
 #include <linux/signal.h>
 #include <linux/compiler.h>
 #include <linux/completion.h>
@@ -1454,6 +1455,7 @@ struct task_struct {
 	unsigned int	sequential_io;
 	unsigned int	sequential_io_avg;
 #endif
+	struct semaphore rw_sem;
 };
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */

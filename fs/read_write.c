@@ -17,6 +17,7 @@
 #include <linux/pagemap.h>
 #include <linux/splice.h>
 #include <linux/compat.h>
+#include <linux/semaphore.h>
 #include "internal.h"
 
 #include <asm/uaccess.h>
@@ -378,6 +379,13 @@ ssize_t do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *pp
 
 EXPORT_SYMBOL(do_sync_read);
 
+struct file_io {
+	struct file *file;
+	char *buf;
+	size_t count;
+	loff_t *pos;
+};
+
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
@@ -405,7 +413,6 @@ ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
 
 	return ret;
 }
-
 EXPORT_SYMBOL(vfs_read);
 
 ssize_t do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
@@ -454,9 +461,42 @@ ssize_t __kernel_write(struct file *file, const char *buf, size_t count, loff_t 
 	return ret;
 }
 
+static int _vfs_write(void *arg)
+{
+	struct file_io *fo = arg;
+	struct file *file = fo->file;
+	char *buf = fo->buf;
+	size_t count = fo->count;
+	int ret = 0;
+	loff_t *pos = fo->pos;
+
+	down(&current->real_parent->rw_sem);
+
+	file_start_write(file);
+	if (file->f_op->write)
+		ret = file->f_op->write(file, buf, count, pos);
+	else
+		ret = do_sync_write(file, buf, count, pos);
+	if (ret > 0) {
+		fsnotify_modify(file);
+		add_wchar(current, ret);
+	}
+	inc_syscw(current);
+	file_end_write(file);
+
+	up(&current->real_parent->rw_sem);
+
+	kfree(fo->buf);
+	kfree(arg);
+
+	WARN_ON(ret != count);
+	return ret;
+}
+
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
 {
 	ssize_t ret;
+	struct file_io *fo;
 
 	if (!(file->f_mode & FMODE_WRITE))
 		return -EBADF;
@@ -468,22 +508,26 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 	ret = rw_verify_area(WRITE, file, pos, count);
 	if (ret >= 0) {
 		count = ret;
-		file_start_write(file);
-		if (file->f_op->write)
-			ret = file->f_op->write(file, buf, count, pos);
-		else
-			ret = do_sync_write(file, buf, count, pos);
-		if (ret > 0) {
-			fsnotify_modify(file);
-			add_wchar(current, ret);
+
+		fo = kmalloc(sizeof(struct file_io), GFP_KERNEL);
+		if (!fo)
+			return -ENOMEM;
+
+		fo->buf = kmalloc(count, GFP_KERNEL);
+		if (fo->buf) {
+			kfree(fo);
+			return -ENOMEM;
 		}
-		inc_syscw(current);
-		file_end_write(file);
+		memcpy(fo->buf, buf, count);
+
+		fo->file = file;
+		fo->count = count;
+		fo->pos = pos;
+
 	}
 
 	return ret;
 }
-
 EXPORT_SYMBOL(vfs_write);
 
 static inline loff_t file_pos_read(struct file *file)

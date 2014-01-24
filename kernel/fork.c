@@ -20,6 +20,7 @@
 #include <linux/personality.h>
 #include <linux/mempolicy.h>
 #include <linux/sem.h>
+#include <linux/semaphore.h>
 #include <linux/file.h>
 #include <linux/fdtable.h>
 #include <linux/iocontext.h>
@@ -523,6 +524,11 @@ static void mm_init_aio(struct mm_struct *mm)
 #endif
 }
 
+static void tsk_init_speculation(struct task_struct *p)
+{
+	sema_init(&p->rw_sem, 1);
+}
+
 static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 {
 	atomic_set(&mm->mm_users, 1);
@@ -537,6 +543,7 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	spin_lock_init(&mm->page_table_lock);
 	mm_init_aio(mm);
 	mm_init_owner(mm, p);
+	tsk_init_speculation(p);
 	clear_tlb_flush_pending(mm);
 
 	if (likely(!mm_alloc_pgd(mm))) {
