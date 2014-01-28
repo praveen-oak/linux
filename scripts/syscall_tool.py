@@ -94,7 +94,7 @@ def main():
             syscall_finder = re.compile("SYSCALL_DEFINE[0-9]\((?P<call>[a-zA-Z0-9\-\_]*)(,.*?)?\)([\s\r\n])*?{", re.MULTILINE | re.DOTALL)
 
             for sourcefile in matches:
-                with open(sourcefile, "w", errors="ignore") as sourcefile_file:
+                with open(sourcefile, "r+", errors="ignore") as sourcefile_file:
                     source = sourcefile_file.read()
                     if (len(syscall_finder.findall(source)) > 0):
                         if (arguments["patch"]):

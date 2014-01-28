@@ -1,6 +1,6 @@
 [
     {
-        "patch": "", 
+        "patch": "int i = 0;", 
         "calls": [
             "32_ftruncate64", 
             "32_llseek", 
