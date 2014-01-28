@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+
+"""syscall_tool.py
+
+This script is used to hack syscalls in the linux kernel
+
+Usage:
+  syscall_tool.py list [<kernel-dir>] [--verbose]
+  syscall_tool.py savelist <list-file> [<kernel-dir>] [--verbose]
+  syscall_tool.py patch <patch-file> [<kernel-dir>] [--verbose]
+  syscall_tool.py (-h | --help)
+  syscall_tool.py --version
+
+Options:
+  -h --help     Show this screen.
+  --version     Show version.
+  --verbose     Print more text.
+
+"""
+from docopt import docopt
+import os,sys,traceback,json, re, pprint,time,fnmatch
+import warnings
+
+
+def main():
+    try:
+        arguments = docopt(__doc__, version='syscall_tool 0.1')
+        if arguments["--verbose"]:
+           print("Launched with arguments:")
+           print(arguments)
+
+        kerneldir = '.'
+        if (arguments["<kernel-dir>"] != None):
+            kerneldir = arguments["<kernel-dir>"]
+
+        if (arguments["list"] | arguments["savelist"]):
+
+            #open every source file
+            if (arguments["--verbose"]):
+                print("Reading kernel source...")
+
+            matches = []
+            for root, dirnames, filenames in os.walk(kerneldir):
+                for filename in fnmatch.filter(filenames, '*.c'):
+                    matches.append(os.path.join(root, filename))
+
+            syscall_finder = re.compile("SYSCALL_DEFINE[0-9]\((?P<call>[a-zA-Z0-9\-\_]*)(,.*?)?\)([\s\r\n])*?{", re.MULTILINE | re.DOTALL)
+            calls = []
+
+            for sourcefile in matches:
+                with open(sourcefile, "r", errors="ignore") as sourcefile_file:
+                    source = sourcefile_file.read()
+
+                    for syscall in syscall_finder.finditer(source):
+                        if (arguments["list"]):
+                            print(syscall.group("call") + "," + sourcefile)
+                        else:
+                            if (arguments["savelist"]):
+                                calls.append(syscall.group("call"))
+
+            if (arguments["savelist"]):
+                calls = list(set(calls)) #remove duplicates (conversion to set)
+                calls.sort()
+                data =   [
+                                {
+                                    "calls" : calls,
+                                    "patch" : ""
+                                 }
+                         ]
+
+                pprint.pprint(data)
+
+                with open(arguments["<list-file>"], 'w') as outfile:
+                    outfile.write(json.dumps(data, indent=4))
+
+
+
+
+    except ValueError as e:
+        print("Error: " + str(e))
+        sys.exit(0)
+
+    except Exception as e:
+        print("Unexpected error:" + str(e))
+        traceback.print_exc()
+        os._exit(1)
+
+
+if __name__ == '__main__':
+    main()
