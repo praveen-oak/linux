@@ -384,6 +384,7 @@ struct file_io {
 	char *buf;
 	size_t count;
 	loff_t *pos;
+	struct work_struct work;
 };
 
 ssize_t vfs_read(struct file *file, char __user *buf, size_t count, loff_t *pos)
@@ -461,16 +462,21 @@ ssize_t __kernel_write(struct file *file, const char *buf, size_t count, loff_t 
 	return ret;
 }
 
-static int _vfs_write(void *arg)
+void _vfs_write(struct work_struct *work)
 {
-	struct file_io *fo = arg;
+	struct file_io *fo = container_of(work, struct file_io, work);
 	struct file *file = fo->file;
 	char *buf = fo->buf;
 	size_t count = fo->count;
-	int ret = 0;
 	loff_t *pos = fo->pos;
+	int ret = 0;
 
-	down(&current->real_parent->rw_sem);
+	while (atomic_inc_return(&current->real_parent->io_wait) != 1) {
+		atomic_dec(&current->real_parent->io_wait);
+		schedule();
+	}
+
+	printk("pid %u\n", current->real_parent->pid);
 
 	file_start_write(file);
 	if (file->f_op->write)
@@ -484,13 +490,12 @@ static int _vfs_write(void *arg)
 	inc_syscw(current);
 	file_end_write(file);
 
-	up(&current->real_parent->rw_sem);
+	atomic_dec(&current->real_parent->io_wait);
 
 	kfree(fo->buf);
-	kfree(arg);
+	kfree(fo);
 
 	WARN_ON(ret != count);
-	return ret;
 }
 
 ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_t *pos)
@@ -509,21 +514,27 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 	if (ret >= 0) {
 		count = ret;
 
-		fo = kmalloc(sizeof(struct file_io), GFP_KERNEL);
-		if (!fo)
-			return -ENOMEM;
+		if (!file->f_op->write)
+			ret = do_sync_write(file, buf, count, pos);
+		else
+		{
+			fo = kmalloc(sizeof(struct file_io), GFP_KERNEL);
+			if (!fo)
+				return -ENOMEM;
 
-		fo->buf = kmalloc(count, GFP_KERNEL);
-		if (fo->buf) {
-			kfree(fo);
-			return -ENOMEM;
+			fo->buf = kmalloc(count, GFP_KERNEL);
+			if (!fo->buf) {
+				kfree(fo);
+				return -ENOMEM;
+			}
+			memcpy(fo->buf, buf, count);
+
+			fo->file = file;
+			fo->count = count;
+			fo->pos = pos;
+			INIT_WORK(&fo->work, _vfs_write);
+			schedule_work(&fo->work);
 		}
-		memcpy(fo->buf, buf, count);
-
-		fo->file = file;
-		fo->count = count;
-		fo->pos = pos;
-
 	}
 
 	return ret;

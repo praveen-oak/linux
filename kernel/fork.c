@@ -526,7 +526,7 @@ static void mm_init_aio(struct mm_struct *mm)
 
 static void tsk_init_speculation(struct task_struct *p)
 {
-	sema_init(&p->rw_sem, 1);
+	atomic_set(&p->io_wait, 0);
 }
 
 static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
