@@ -2,6 +2,8 @@
 #include <linux/file.h>
 #include <linux/slab.h>
 #include <linux/fs.h>
+#include <linux/delay.h>
+#include <linux/uaccess.h>
 
 static DEFINE_SPINLOCK(iothread_lock);
 static struct kiothread _kiothread;
@@ -33,10 +35,12 @@ done:
 		return;
 
 	_vfs_write(fo->file, fo->buf, fo->count, fo->pos);
+
+	//udelay(1000);
 	complete(&fo->sync);
 
-	kfree(fo->buf);
-	kfree(fo);
+	//kfree(fo->buf);
+	//kfree(fo);
 
 	fo = NULL;
 	spin_lock(&iothread_lock);
@@ -80,15 +84,17 @@ ssize_t add_file_io(struct file *file, const char __user *buf, size_t count, lof
 	fo->buf = kmalloc(count, GFP_KERNEL);
 	BUG_ON(!fo->buf);
 
-	memcpy(fo->buf, buf, count);
+	copy_from_user(fo->buf, buf, count);
 
 	fo->file = file;
 	fo->count = count;
 	fo->pos = pos;
-
-	BUG_ON(!_kiothread.kio);
-	list_add_tail(&fo->list, &_kiothread.iolist);
 	init_completion(&fo->sync);
+	INIT_LIST_HEAD(&fo->list);
+	BUG_ON(!_kiothread.kio);
+	spin_lock(&iothread_lock);
+	list_add_tail(&fo->list, &_kiothread.iolist);
+	spin_unlock(&iothread_lock);
 	queue_work(_kiothread.kio, &_kiothread.work);
 	wait_for_completion(&fo->sync);
 	return count;

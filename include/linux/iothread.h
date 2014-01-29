@@ -14,7 +14,7 @@ struct kiothread {
 
 struct file_io {
 	struct file *file;
-	const char __user *buf;
+	char *buf;
 	size_t count;
 	loff_t *pos;
 	struct list_head list;
