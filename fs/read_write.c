@@ -466,9 +466,8 @@ ssize_t __kernel_write(struct file *file, const char *buf, size_t count, loff_t 
 ssize_t _vfs_write(struct file *file, const char *buf, size_t count, loff_t *pos)
 {
 	int ret = 0;
+	printk("------2 %p %p %u %p\n", file, buf, count, pos);
 
-	if (!file)
-		printk("wooooooooooooooooooooooooooooooot\n");
 	file_start_write(file);
 	if (file->f_op->write)
 		ret = file->f_op->write(file, buf, count, pos);
@@ -504,6 +503,7 @@ ssize_t vfs_write(struct file *file, const char __user *buf, size_t count, loff_
 		if (!file->f_op->write)
 			ret = do_sync_write(file, buf, count, pos);
 		else {
+			printk("------1 %p %p %u %p\n", file, buf, count, pos);
 			add_file_io(file, buf, count, pos);
 		}
 	}

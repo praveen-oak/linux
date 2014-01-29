@@ -25,19 +25,20 @@ next:
 
 	fo = list_first_entry(&kio->iolist, struct file_io, list);
 
-	list_del(&fo->list);
+	list_del_init(&fo->list);
 done:
 	spin_unlock(&iothread_lock);
 
 	if (!fo)
 		return;
 
-	printk("count: %u\n", fo->count);
 	_vfs_write(fo->file, fo->buf, fo->count, fo->pos);
 	complete(&fo->sync);
-//	kfree(fo->buf);
-//	kfree(fo);
 
+	kfree(fo->buf);
+	kfree(fo);
+
+	fo = NULL;
 	spin_lock(&iothread_lock);
 	goto next;
 }
