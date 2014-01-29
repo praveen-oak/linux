@@ -1456,6 +1456,7 @@ struct task_struct {
 	unsigned int	sequential_io_avg;
 #endif
 	atomic_t io_wait;
+	struct list_head io_list;
 };
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */

@@ -17,6 +17,7 @@
 #include <linux/pfn.h>
 #include <linux/bit_spinlock.h>
 #include <linux/shrinker.h>
+#include <linux/iothread.h>
 
 struct mempolicy;
 struct anon_vma;

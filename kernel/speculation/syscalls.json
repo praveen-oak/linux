@@ -1,6 +1,6 @@
 [
     {
-        "patch": "int i = 0;", 
+        "patch": "\tspeculate_away_and_wait();", 
         "calls": [
             "32_ftruncate64", 
             "32_llseek", 
@@ -91,7 +91,6 @@
             "futex", 
             "futimesat", 
             "get_mempolicy", 
-            "get_robust_list", 
             "get_thread_area", 
             "getcpu", 
             "getcwd", 
@@ -326,7 +325,6 @@
             "sendmsg", 
             "sendto", 
             "set_mempolicy", 
-            "set_robust_list", 
             "set_thread_area", 
             "set_tid_address", 
             "setdomainname", 
