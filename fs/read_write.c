@@ -597,7 +597,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	ssize_t ret = -EBADF;
 
 	if (f) {
-		if (0) { //activate_specu()) {
+		if (kiothread_activated()) {
 			loff_t pos = file_pos_read(f);
 			add_file_io(f, buf, count, pos);
 			ret = count;
