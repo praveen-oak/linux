@@ -597,7 +597,7 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	ssize_t ret = -EBADF;
 
 	if (f) {
-		if (activate_specu()) {
+		if (0) { //activate_specu()) {
 			loff_t pos = file_pos_read(f);
 			add_file_io(f, buf, count, pos);
 			ret = count;

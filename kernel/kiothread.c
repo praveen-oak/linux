@@ -81,6 +81,7 @@ int speculate_away_and_wait(void)
 	spin_lock(&iothread_lock);
 	while (_kiothread.in_progress) {
 		spin_unlock(&iothread_lock);
+		schedule();
 		spin_lock(&iothread_lock);
 	}
 	spin_unlock(&iothread_lock);
