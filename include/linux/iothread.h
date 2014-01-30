@@ -15,18 +15,16 @@ struct kiothread {
 };
 
 struct file_io {
-	struct fd f;
-	char *buf;
+	struct list_head list;
+	struct task_struct *tsk;
+	struct file *f;
 	size_t count;
 	loff_t pos;
-	bool fdput;
-	struct task_struct *tsk;
-	struct list_head list;
-	struct completion sync;
+	char buf[];
 };
 
 void init_kiothread(void);
-ssize_t add_file_io(struct fd f, const char *buf, size_t count, loff_t pos, bool fdput);
+ssize_t add_file_io(struct file *f, const char *buf, size_t count, loff_t pos);
 void speculate_set_iowait(void);
 void speculate_remove_iowait(void);
 void add_kiocb(struct kiocb *);

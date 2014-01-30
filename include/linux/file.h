@@ -8,11 +8,11 @@
 #include <linux/compiler.h>
 #include <linux/types.h>
 #include <linux/posix_types.h>
-
+#include <linux/sched.h>
 struct file;
 
 extern void fput(struct file *);
-
+extern void fput_write(struct file *, struct task_struct *);
 struct file_operations;
 struct vfsmount;
 struct dentry;

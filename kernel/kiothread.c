@@ -6,9 +6,13 @@
 #include <linux/uaccess.h>
 #include <linux/aio.h>
 #include <linux/completion.h>
+#include <linux/atomic.h>
+#include <linux/llist.h>
+#include <linux/sched.h>
 
 static DEFINE_SPINLOCK(iothread_lock);
 static struct kiothread _kiothread;
+
 
 static void run_queue(struct work_struct *work)
 {
@@ -30,30 +34,24 @@ next:
 
 	fo = list_first_entry(&kio->iolist, struct file_io, list);
 
-	list_del_init(&fo->list);
+	list_del(&fo->list);
 done:
 	spin_unlock(&iothread_lock);
 
 	if (!fo)
 		return;
 
-	printk("g1\n");
-
-	printk("%p, %u %u\n", fo->f.file, fo->count, fo->pos);
-	ret = vfs_write(fo->f.file, fo->buf, fo->count, &fo->pos);
+	//printk("%p, %u %u\n", fo->f.file, fo->count, fo->pos);
+	ret = vfs_write(fo->f, &fo->buf, fo->count, &fo->pos);
 	if (ret > 0) {
-		_vfs_write(fo->f.file, fo->buf, fo->count, &fo->pos, fo->tsk);
+		_vfs_write(fo->f, &fo->buf, fo->count, &fo->pos, fo->tsk);
 	}
 
-	if (fo->fdput)
-		fdput(fo->f);
+	fput_write(fo->f, fo->tsk);
 
-	printk("g2 ret %u\n", ret);
+	//printk("g2 ret %u\n", ret);
 
-	//kfree(fo->buf);
-	//kfree(fo);
-	
-//	complete(&fo->sync);
+//	kfree(fo);
 
 	fo = NULL;
 	spin_lock(&iothread_lock);
@@ -119,26 +117,17 @@ void add_kiocb(struct kiocb *kiocb)
 	queue_work(_kiothread.kio, &_kiothread.work);
 }
 
-ssize_t add_file_io(struct fd f, const char __user *buf, size_t count, loff_t pos, bool fdput)
+ssize_t add_file_io(struct file *f, const char __user *buf, size_t count, loff_t pos)
 {
-//	return _vfs_write(file, buf, count, pos);
-	struct file_io *fo = kmalloc(sizeof(struct file_io), GFP_KERNEL);
+	struct file_io *fo = kmalloc(sizeof(struct file_io)+count, GFP_KERNEL);
 	BUG_ON(!fo);
-
-	fo->buf = kmalloc(count, GFP_KERNEL);
-	BUG_ON(!fo->buf);
-
-	copy_from_user(fo->buf, buf, count);
 
 	fo->f = f;
 	fo->count = count;
 	fo->pos = pos;
 	fo->tsk = current;
-	fo->fdput = fdput;
+	copy_from_user(&fo->buf, buf, count);
 
-	printk("1 %p, %u %u\n", fo->f.file, fo->count, fo->pos);
-
-	init_completion(&fo->sync);
 	INIT_LIST_HEAD(&fo->list);
 
 	BUG_ON(!_kiothread.kio);
@@ -148,6 +137,5 @@ ssize_t add_file_io(struct fd f, const char __user *buf, size_t count, loff_t po
 	spin_unlock(&iothread_lock);
 
 	queue_work(_kiothread.kio, &_kiothread.work);
-//	wait_for_completion(&fo->sync);
 	return count;
 }
