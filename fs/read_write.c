@@ -559,6 +559,26 @@ SYSCALL_DEFINE3(read, unsigned int, fd, char __user *, buf, size_t, count)
 	return ret;
 }
 
+static int activate_specu(void)
+{
+	char *p;
+	int ret = 0;
+	struct mm_struct *mm = current->mm;
+	if (mm) {
+		down_read(&mm->mmap_sem);
+		if (mm->exe_file) {
+			char path[100];
+			p = d_path(&mm->exe_file->f_path, &path, 100);
+			if (!strcmp(p, "/usr/bin/dd")) {
+				ret = 1;
+			}
+			/*printk("\"%s\"\n", p);*/
+		}
+		up_read(&mm->mmap_sem);
+	}
+	return ret;
+}
+
 SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 		size_t, count)
 {
@@ -569,11 +589,19 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	ssize_t ret = -EBADF;
 
 	if (f.file) {
-		loff_t pos = file_pos_read(f.file);
+		/*loff_t pos = file_pos_read(f.file);
+		printk("pos %p %u %u\n", f.file, count, pos);
 		add_file_io(f, buf, count, pos, 1);
 		ret = count;
 		file_pos_write(f.file, pos+count);
+		//fdput(f);
+		//*/
+		loff_t pos = file_pos_read(f.file);
+		ret = vfs_write(f.file, buf, count, &pos);
+		if (ret >= 0)
+			file_pos_write(f.file, pos);
 		fdput(f);
+		activate_specu();
 	}
 
 	return ret;

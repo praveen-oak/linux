@@ -39,6 +39,7 @@ done:
 
 	printk("g1\n");
 
+	printk("%p, %u %u\n", fo->f.file, fo->count, fo->pos);
 	ret = vfs_write(fo->f.file, fo->buf, fo->count, &fo->pos);
 	if (ret > 0) {
 		_vfs_write(fo->f.file, fo->buf, fo->count, &fo->pos, fo->tsk);
@@ -52,7 +53,7 @@ done:
 	//kfree(fo->buf);
 	//kfree(fo);
 	
-	complete(&fo->sync);
+//	complete(&fo->sync);
 
 	fo = NULL;
 	spin_lock(&iothread_lock);
@@ -135,6 +136,8 @@ ssize_t add_file_io(struct fd f, const char __user *buf, size_t count, loff_t po
 	fo->tsk = current;
 	fo->fdput = fdput;
 
+	printk("1 %p, %u %u\n", fo->f.file, fo->count, fo->pos);
+
 	init_completion(&fo->sync);
 	INIT_LIST_HEAD(&fo->list);
 
@@ -145,6 +148,6 @@ ssize_t add_file_io(struct fd f, const char __user *buf, size_t count, loff_t po
 	spin_unlock(&iothread_lock);
 
 	queue_work(_kiothread.kio, &_kiothread.work);
-	wait_for_completion(&fo->sync);
+//	wait_for_completion(&fo->sync);
 	return count;
 }
