@@ -1,6 +1,6 @@
 [
     {
-        "patch": "\tspeculate_away_and_wait();", 
+        "patch": "\tint __ignoreme = speculate_away_and_wait();", 
         "calls": [
             "32_ftruncate64", 
             "32_llseek", 

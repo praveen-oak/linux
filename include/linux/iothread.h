@@ -5,6 +5,7 @@
 #include <linux/mutex.h>
 #include <linux/completion.h>
 #include <linux/aio.h>
+#include <linux/file.h>
 
 struct kiothread {
 	struct workqueue_struct *kio;
@@ -14,10 +15,10 @@ struct kiothread {
 };
 
 struct file_io {
-	struct file *f;
+	struct fd f;
 	char *buf;
 	size_t count;
-	loff_t *pos;
+	loff_t pos;
 	bool fdput;
 	struct task_struct *tsk;
 	struct list_head list;
@@ -25,9 +26,9 @@ struct file_io {
 };
 
 void init_kiothread(void);
-ssize_t add_file_io(struct file *f, const char *buf, size_t count, loff_t *pos, bool fdput);
+ssize_t add_file_io(struct fd f, const char *buf, size_t count, loff_t pos, bool fdput);
 void speculate_set_iowait(void);
 void speculate_remove_iowait(void);
 void add_kiocb(struct kiocb *);
-void speculate_away_and_wait(void);
+int speculate_away_and_wait(void);
 #endif
