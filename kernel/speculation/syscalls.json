@@ -70,7 +70,7 @@
             "clock_gettime", 
             "clock_nanosleep", 
             "lookup_dcookie"
-	]
+	],
         "patch": "\tint __ignoreme = speculate_away_and_wait();", 
         "calls": [
             "32_ftruncate64", 
