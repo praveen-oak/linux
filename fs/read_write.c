@@ -570,6 +570,13 @@ static int activate_specu(void)
 			char path[100];
 			p = d_path(&mm->exe_file->f_path, &path, 100);
 			if (!strcmp(p, "/usr/bin/dd")) {
+				//printk("dd\n");
+				ret = 1;
+			} else if (!strcmp(p, "/usr/bin/git")) {
+				//printk("git\n");
+				ret = 1;
+			} else if (!strcmp(p, "/usr/bin/bzip2")) {
+				//printk("bzip2\n");
 				ret = 1;
 			}
 			/*printk("\"%s\"\n", p);*/
