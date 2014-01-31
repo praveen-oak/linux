@@ -883,6 +883,7 @@ const struct address_space_operations ext2_aops = {
 	.migratepage		= buffer_migrate_page,
 	.is_partially_uptodate	= block_is_partially_uptodate,
 	.error_remove_page	= generic_error_remove_page,
+	.trackme		= 1,
 };
 
 const struct address_space_operations ext2_aops_xip = {
@@ -901,6 +902,7 @@ const struct address_space_operations ext2_nobh_aops = {
 	.writepages		= ext2_writepages,
 	.migratepage		= buffer_migrate_page,
 	.error_remove_page	= generic_error_remove_page,
+	.trackme		= 1,
 };
 
 /*

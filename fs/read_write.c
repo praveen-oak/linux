@@ -597,7 +597,10 @@ SYSCALL_DEFINE3(write, unsigned int, fd, const char __user *, buf,
 	ssize_t ret = -EBADF;
 
 	if (f) {
-		if (kiothread_activated()) {
+		struct address_space *mapping = f->f_mapping;
+		const struct address_space_operations *a_ops = mapping->a_ops;
+		if (kiothread_activated() && a_ops->trackme) {
+		
 			loff_t pos = file_pos_read(f);
 			add_file_io(f, buf, count, pos);
 			ret = count;
