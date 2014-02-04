@@ -2724,27 +2724,29 @@ static const struct address_space_operations shmem_aops = {
 				     We shouldn't account for the 10ns DRAM access */
 static inline ssize_t wait_do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
 {
-	ndelay(PCM_READ_LATENCY);
+	unsigned int num_pages = DIV_ROUND_UP(len, PAGE_SIZE);
+	ndelay(PCM_READ_LATENCY * num_pages);
 	return do_sync_read(filp, buf, len, ppos);
 }
 
 static inline ssize_t wait_shmem_file_aio_read(struct kiocb *iocb,
 		const struct iovec *iov, unsigned long nr_segs, loff_t pos)
 {
-	ndelay(PCM_READ_LATENCY);
+	ndelay(PCM_READ_LATENCY * nr_segs);
 	return shmem_file_aio_read(iocb, iov, nr_segs, pos);
 }
 
 static inline ssize_t wait_do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
 {
-	udelay(PCM_WRITE_LATENCY);
+	unsigned int num_pages = DIV_ROUND_UP(len, PAGE_SIZE);
+	udelay(PCM_WRITE_LATENCY * num_pages);
 	return do_sync_write(filp, buf, len, ppos);
 }
 
 static inline ssize_t wait_generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		unsigned long nr_segs, loff_t pos)
 {
-	udelay(PCM_WRITE_LATENCY);
+	udelay(PCM_WRITE_LATENCY * nr_segs);
 	return generic_file_aio_write(iocb, iov, nr_segs, pos);
 }
 
