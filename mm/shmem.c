@@ -32,6 +32,7 @@
 #include <linux/export.h>
 #include <linux/swap.h>
 #include <linux/aio.h>
+#include <linux/delay.h>
 
 static struct vfsmount *shm_mnt;
 
@@ -2718,14 +2719,44 @@ static const struct address_space_operations shmem_aops = {
 	.error_remove_page = generic_error_remove_page,
 };
 
+#define PCM_WRITE_LATENCY 35  /* assumes 35us access time to PCM */
+#define PCM_READ_LATENCY 100 - 10 /* assumes 100ns access time to PCM. 
+				     We shouldn't account for the 10ns DRAM access */
+static inline ssize_t wait_do_sync_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos)
+{
+	ndelay(PCM_READ_LATENCY);
+	return do_sync_read(filp, buf, len, ppos);
+}
+
+static inline ssize_t wait_shmem_file_aio_read(struct kiocb *iocb,
+		const struct iovec *iov, unsigned long nr_segs, loff_t pos)
+{
+	ndelay(PCM_READ_LATENCY);
+	return shmem_file_aio_read(iocb, iov, nr_segs, pos);
+}
+
+static inline ssize_t wait_do_sync_write(struct file *filp, const char __user *buf, size_t len, loff_t *ppos)
+{
+	udelay(PCM_WRITE_LATENCY);
+	return do_sync_write(filp, buf, len, ppos);
+}
+
+static inline ssize_t wait_generic_file_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos)
+{
+	udelay(PCM_WRITE_LATENCY);
+	return generic_file_aio_write(iocb, iov, nr_segs, pos);
+}
+
+
 static const struct file_operations shmem_file_operations = {
 	.mmap		= shmem_mmap,
 #ifdef CONFIG_TMPFS
 	.llseek		= shmem_file_llseek,
-	.read		= do_sync_read,
-	.write		= do_sync_write,
-	.aio_read	= shmem_file_aio_read,
-	.aio_write	= generic_file_aio_write,
+	.read		= wait_do_sync_read,
+	.write		= wait_do_sync_write,
+	.aio_read	= wait_shmem_file_aio_read,
+	.aio_write	= wait_generic_file_aio_write,
 	.fsync		= noop_fsync,
 	.splice_read	= shmem_file_splice_read,
 	.splice_write	= generic_file_splice_write,
