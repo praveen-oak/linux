@@ -118,7 +118,6 @@ struct hd_struct {
 	int make_it_fail;
 #endif
 	unsigned long stamp;
-	atomic_t in_flight[2];
 #ifdef	CONFIG_SMP
 	struct disk_stats __percpu *dkstats;
 #else
@@ -126,6 +125,7 @@ struct hd_struct {
 #endif
 	atomic_t ref;
 	struct rcu_head rcu_head;
+	struct percpu_counter in_flight[2];
 };
 
 #define GENHD_FL_REMOVABLE			1
@@ -330,15 +330,26 @@ static inline void part_stat_set_all(struct hd_struct *part, int value)
 
 static inline int init_part_stats(struct hd_struct *part)
 {
+	if (percpu_counter_init(&part->in_flight[0], 0))
+		return 0;
+	if (percpu_counter_init(&part->in_flight[1], 0))
+		goto err_cnt;
 	part->dkstats = alloc_percpu(struct disk_stats);
 	if (!part->dkstats)
-		return 0;
+		goto err_stats;
 	return 1;
+err_stats:
+	percpu_counter_destroy(&part->in_flight[1]);
+err_cnt:
+	percpu_counter_destroy(&part->in_flight[0]);
+	return 0;
 }
 
 static inline void free_part_stats(struct hd_struct *part)
 {
 	free_percpu(part->dkstats);
+	percpu_counter_destroy(&part->in_flight[1]);
+	percpu_counter_destroy(&part->in_flight[0]);
 }
 
 #else /* !CONFIG_SMP */
@@ -382,21 +393,21 @@ static inline void free_part_stats(struct hd_struct *part)
 
 static inline void part_inc_in_flight(struct hd_struct *part, int rw)
 {
-	atomic_inc(&part->in_flight[rw]);
+	__percpu_counter_add(&part->in_flight[rw], 1, 1000000);
 	if (part->partno)
-		atomic_inc(&part_to_disk(part)->part0.in_flight[rw]);
+		__percpu_counter_add(&part_to_disk(part)->part0.in_flight[rw], 1, 1000000);
 }
 
 static inline void part_dec_in_flight(struct hd_struct *part, int rw)
 {
-	atomic_dec(&part->in_flight[rw]);
+	__percpu_counter_add(&part->in_flight[rw], -1, 1000000);
 	if (part->partno)
-		atomic_dec(&part_to_disk(part)->part0.in_flight[rw]);
+		__percpu_counter_add(&part_to_disk(part)->part0.in_flight[rw], -1, 1000000);
 }
 
 static inline int part_in_flight(struct hd_struct *part)
 {
-	return atomic_read(&part->in_flight[0]) + atomic_read(&part->in_flight[1]);
+	return percpu_counter_sum(&part->in_flight[0]) + percpu_counter_sum(&part->in_flight[1]);
 }
 
 static inline struct partition_meta_info *alloc_part_info(struct gendisk *disk)
