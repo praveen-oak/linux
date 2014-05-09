@@ -325,11 +325,11 @@ static int nvme_npages(unsigned size)
 }
 
 static struct nvme_iod *
-nvme_alloc_iod(unsigned nseg, unsigned nbytes, gfp_t gfp)
+nvme_alloc_iod(unsigned nseg, unsigned nbytes, gfp_t gfp, int node)
 {
-	struct nvme_iod *iod = kmalloc(sizeof(struct nvme_iod) +
+	struct nvme_iod *iod = kmalloc_node(sizeof(struct nvme_iod) +
 				sizeof(__le64 *) * nvme_npages(nbytes) +
-				sizeof(struct scatterlist) * nseg, gfp);
+				sizeof(struct scatterlist) * nseg, gfp, node);
 
 	if (iod) {
 		iod->offset = offsetof(struct nvme_iod, sg[nseg]);
@@ -397,6 +397,7 @@ int nvme_setup_prps(struct nvme_dev *dev, struct nvme_common_command *cmd,
 	int nprps, i;
 
 	cmd->prp1 = cpu_to_le64(dma_addr);
+	cmd->prp2 = 0;
 	length -= (PAGE_SIZE - offset);
 	if (length <= 0)
 		return total_len;
@@ -565,8 +566,12 @@ static int nvme_submit_rq_queue(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 			return result;
 	}
 
+	if (rq->cpu < 0)
+		rq->cpu = smp_processor_id();
+
 	result = -ENOMEM;
-	iod = nvme_alloc_iod(psegs, blk_rq_bytes(rq), GFP_ATOMIC);
+	iod = nvme_alloc_iod(psegs, blk_rq_bytes(rq), GFP_ATOMIC,
+							cpu_to_node(rq->cpu));
 	if (!iod)
 		goto nomem;
 	iod->private = rq;
@@ -598,29 +603,28 @@ static int nvme_submit_rq_queue(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 
 	cmnd = &nvmeq->sq_cmds[nvmeq->sq_tail];
 
-	memset(cmnd, 0, sizeof(*cmnd));
-	if (rq_data_dir(rq)) {
-		cmnd->rw.opcode = nvme_cmd_write;
-		dma_dir = DMA_TO_DEVICE;
-	} else {
-		cmnd->rw.opcode = nvme_cmd_read;
-		dma_dir = DMA_FROM_DEVICE;
-	}
+	dma_dir = rq_data_dir(rq) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
 	result = nvme_map_rq(nvmeq, iod, rq, dma_dir, psegs);
 	if (result < 0)
 		goto free_cmdid;
 
-	length = blk_rq_bytes(rq);
-
+	cmnd->rw.opcode = (dma_dir == DMA_TO_DEVICE ? nvme_cmd_write :
+								nvme_cmd_read);
+	cmnd->rw.flags = 0;
 	cmnd->rw.command_id = rq->tag;
 	cmnd->rw.nsid = cpu_to_le32(ns->ns_id);
-	length = nvme_setup_prps(nvmeq->dev, &cmnd->common, iod, length,
-								GFP_ATOMIC);
+	cmnd->rw.rsvd2 = 0;
+	cmnd->rw.metadata = 0;
+	length = nvme_setup_prps(nvmeq->dev, &cmnd->common, iod,
+						blk_rq_bytes(rq), GFP_ATOMIC);
 	cmnd->rw.slba = cpu_to_le64(nvme_block_nr(ns, blk_rq_pos(rq)));
 	cmnd->rw.length = cpu_to_le16((length >> ns->lba_shift) - 1);
 	cmnd->rw.control = cpu_to_le16(control);
 	cmnd->rw.dsmgmt = cpu_to_le32(dsmgmt);
+	cmnd->rw.reftag = 0;
+	cmnd->rw.apptag = 0;
+	cmnd->rw.appmask = 0;
 
 	if (++nvmeq->sq_tail == nvmeq->q_depth)
 		nvmeq->sq_tail = 0;
@@ -1328,7 +1332,7 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 		dev->admin_tags.nr_hw_queues = 1,
 		dev->admin_tags.queue_depth = 64,
 		dev->admin_tags.timeout = ADMIN_TIMEOUT,
-		dev->admin_tags.numa_node= NUMA_NO_NODE,
+		dev->admin_tags.numa_node = NUMA_NO_NODE,
 		dev->admin_tags.cmd_size = sizeof(struct nvme_cmd_info),
 		dev->admin_tags.driver_data = dev;
 
@@ -1399,7 +1403,7 @@ struct nvme_iod *nvme_map_user_pages(struct nvme_dev *dev, int write,
 		goto put_pages;
 	}
 
-	iod = nvme_alloc_iod(count, length, GFP_KERNEL);
+	iod = nvme_alloc_iod(count, length, GFP_KERNEL, NUMA_NO_NODE);
 	sg = iod->sg;
 	sg_init_table(sg, count);
 	for (i = 0; i < count; i++) {
@@ -1778,6 +1782,8 @@ static struct nvme_ns *nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid,
 	blk_queue_logical_block_size(ns->queue, 1 << ns->lba_shift);
 	if (dev->max_hw_sectors)
 		blk_queue_max_hw_sectors(ns->queue, dev->max_hw_sectors);
+	else
+		blk_queue_max_hw_sectors(ns->queue, 0xffff);
 
 	disk->major = nvme_major;
 	disk->first_minor = 0;
